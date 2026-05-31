@@ -22,25 +22,6 @@
 | **强制竖屏** | 锁定纵向显示，不受重力感应影响 |
 | **浅色主题** | 强制浅色模式，深绿色主题配色 |
 
----
-
-## 截图
-
-> 请将截图文件放置于 `screenshots/` 目录下，建议命名如下：
-
-```
-screenshots/
-├── main_camera.png          # 主界面 - 相机预览
-├── code_angle_bar.png       # 田块/样本 + 角度选择栏
-├── photo_captured.png       # 拍照后预览定格
-├── gallery_main.png         # 照片集主界面
-├── gallery_detail.png       # 照片集详情/大图
-├── export_import.png        # 导出/导入功能
-```
-
-<!-- 示例（待替换为真实截图）：
-![主界面](screenshots/main_camera.png)
--->
 
 ---
 
@@ -190,29 +171,6 @@ git clone git@github.com:CyanKirin99/EasyCamera.git
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 签名构建（发布版）
-
-项目根目录下 `keystore/easycamera_release.jks` 为发布签名文件（**请勿提交至公开仓库**，已在 `.gitignore` 中排除）。
-
-```bash
-./gradlew assembleRelease
-```
-
----
-
-## 设计决策
-
-### 为什么使用 4:3 而非 16:9？
-
-相机传感器原生比例多为 4:3，使用 4:3 可充分利用传感器全分辨率而不裁切，获取更高的图像质量。
-
-### 为什么强制竖屏 + 浅色模式？
-
-田间采样场景中用户通常单手持机操作，竖屏更符合使用习惯。浅色模式在户外强光下比深色模式具有更好的可读性。
-
-### 照片方向处理逻辑
-
-不同的 Android 设备在拍照时输出的 EXIF 方向标签不一致。本项目通过检查照片的实际像素尺寸（而非依赖 EXIF 标签）来决定是否需要旋转，确保在所有设备上最终保存的照片均为横向（长边 > 短边）。
 
 ---
 
