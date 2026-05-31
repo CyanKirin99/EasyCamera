@@ -121,13 +121,11 @@ app/src/main/java/com/example/easycamera/
 - **操作员** — 自定义文本
 - **定位** — 自动获取当前位置，可手动刷新
 
-![信息栏](screenshots/main_camera.png)
 
 ### 3. 设置田块/样本编码
 
 中间栏使用 `+` / `-` 按钮调整田块（Field）和样本（Sample）编码，支持点击编码数字直接编辑。
 
-![编码栏](screenshots/code_angle_bar.png)
 
 ### 4. 选择角度与拍照
 
@@ -136,7 +134,6 @@ app/src/main/java/com/example/easycamera/
 - 每个编码下的 4 个角度拍完后自动弹出确认组对话框
 - **重拍本组** 可清空当前编码所有照片重新拍摄
 
-![拍照](screenshots/photo_captured.png)
 
 ### 5. 照片方向修正
 
