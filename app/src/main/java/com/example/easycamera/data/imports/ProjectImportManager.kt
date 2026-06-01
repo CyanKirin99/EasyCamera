@@ -71,7 +71,7 @@ object ProjectImportManager {
 
                             val appDir = File(
                                 context.getExternalFilesDir(null),
-                                name
+                                "${PROJECT_ROOT_NAME}/${name}"
                             )
                             val exists = appDir.exists()
 
@@ -131,7 +131,7 @@ object ProjectImportManager {
                         if (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) {
                             val targetFile = File(
                                 context.getExternalFilesDir(null),
-                                name
+                                "${PROJECT_ROOT_NAME}/${name}"
                             )
 
                             if (targetFile.exists() && !overwriteExisting) {
@@ -155,27 +155,46 @@ object ProjectImportManager {
                 "${PROJECT_ROOT_NAME}/${plan.region}_${plan.date}/metadata.csv"
             )
 
-            if (metadataFile.exists()) {
-                val existingLines = CsvUtils.readAllLines(metadataFile)
-                val existingHeadersLine = if (existingLines.isNotEmpty()) existingLines.first() else emptyList()
+            val existingLines = if (metadataFile.exists()) {
+                CsvUtils.readAllLines(metadataFile)
+            } else {
+                emptyList()
+            }
 
-                for (importEntry in plan.entries) {
-                    val metadataValues = importEntry.metadataValues
-                    if (metadataValues != null && metadataValues.size == MetadataRepository.HEADERS.size) {
-                        if (metadataValues[0].isNotEmpty()) {
-                            val isDuplicate = existingLines.any { existingRow ->
-                                existingRow.size >= 5 &&
-                                        existingRow[0] == metadataValues[0] &&
-                                        existingRow[1] == metadataValues[1] &&
-                                        existingRow[2] == metadataValues[2] &&
-                                        existingRow[3] == metadataValues[3] &&
-                                        existingRow[4] == metadataValues[4]
-                            }
+            val hasAnyMetadata = plan.entries.any { it.metadataValues != null }
+            if (hasAnyMetadata && !metadataFile.exists()) {
+                CsvUtils.writeHeader(metadataFile, MetadataRepository.HEADERS)
+            }
 
-                            if (!isDuplicate || overwriteExisting) {
-                                if (metadataValues[9].isNotEmpty()) {
-                                    CsvUtils.appendLine(metadataFile, metadataValues)
-                                }
+            for (importEntry in plan.entries) {
+                val metadataValues = importEntry.metadataValues
+                if (metadataValues != null && metadataValues.size == MetadataRepository.HEADERS.size) {
+                    if (metadataValues[0].isNotEmpty()) {
+                        val updatedValues = metadataValues.toMutableList()
+                        val newRelativePath = "${PROJECT_ROOT_NAME}/${importEntry.relativePath}"
+                        val newFilePath = File(
+                            context.getExternalFilesDir(null),
+                            newRelativePath
+                        ).absolutePath
+                        if (updatedValues.size > 11) {
+                            updatedValues[11] = newFilePath
+                        }
+                        if (updatedValues.size > 10) {
+                            updatedValues[10] = newRelativePath
+                        }
+
+                        val isDuplicate = existingLines.any { existingRow ->
+                            existingRow.size >= 5 &&
+                                    existingRow[0] == updatedValues[0] &&
+                                    existingRow[1] == updatedValues[1] &&
+                                    existingRow[2] == updatedValues[2] &&
+                                    existingRow[3] == updatedValues[3] &&
+                                    existingRow[4] == updatedValues[4]
+                        }
+
+                        if (!isDuplicate || overwriteExisting) {
+                            if (updatedValues[9].isNotEmpty()) {
+                                CsvUtils.appendLine(metadataFile, updatedValues)
                             }
                         }
                     }
