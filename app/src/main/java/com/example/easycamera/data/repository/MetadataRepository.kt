@@ -157,6 +157,54 @@ class MetadataRepository(private val context: Context) {
     }
 
     /**
+     * Finds a single metadata record from CSV matching (region, date, fieldCode, sampleCode, angleCode).
+     * Returns null if no match is found.
+     */
+    fun findMatchingRecord(
+        region: String,
+        date: String,
+        fieldCode: String,
+        sampleCode: String,
+        angleCode: String
+    ): CaptureMetadata? {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return null
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.size < 2) return null
+
+            for (row in allLines.drop(1)) {
+                if (row.size >= 12 &&
+                    row[0] == region &&
+                    row[1] == date &&
+                    row[2] == fieldCode &&
+                    row[3] == sampleCode &&
+                    row[4] == angleCode
+                ) {
+                    return CaptureMetadata(
+                        region = row[0],
+                        date = row[1],
+                        fieldCode = row[2],
+                        sampleCode = row[3],
+                        angleCode = row[4],
+                        longitude = row.getOrElse(5) { "" },
+                        latitude = row.getOrElse(6) { "" },
+                        operator = row.getOrElse(7) { "" },
+                        captureTime = row.getOrElse(8) { "" },
+                        filename = row.getOrElse(9) { "" },
+                        relativePath = row.getOrElse(10) { "" },
+                        filePath = row.getOrElse(11) { "" }
+                    )
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * Updates the field_code column and file path info for all records matching
      * (region, date, oldFieldCode, sampleCode) to use newFieldCode instead.
      */

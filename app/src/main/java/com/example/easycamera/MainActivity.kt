@@ -382,8 +382,17 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                     "EasyCamera/${config.region}_${config.date}/images"
                 )
                 val outputFile = File(dir, viewModel.previewFileName)
-                if (existingMatch != null || outputFile.exists()) {
-                    overwriteExistingMatch = existingMatch
+                val dbMatch = if (existingMatch == null && !outputFile.exists()) {
+                    metadataRepository.findMatchingRecord(
+                        region = config.region,
+                        date = config.date,
+                        fieldCode = curFieldCode,
+                        sampleCode = curSampleCode,
+                        angleCode = curAngleCode
+                    )
+                } else null
+                if (existingMatch != null || outputFile.exists() || dbMatch != null) {
+                    overwriteExistingMatch = existingMatch ?: dbMatch
                     pendingOverwriteDoCapture = doCapture
                     showOverwriteConfirmDialog = true
                 } else if ((!locationDetermined || isLocationNA) && !dontShowNAWarning) {
