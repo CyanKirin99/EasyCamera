@@ -427,10 +427,28 @@ class CaptureViewModel : ViewModel() {
         val state = _captureState.value
         val config = _sessionConfig.value
         val currentAngle = config.angleSequence.getOrElse(state.currentAngleIndex) { return }
+        val curFieldCode = CaptureCodeManager.formatCode(state.fieldCode)
+        val curSampleCode = CaptureCodeManager.formatCode(state.sampleCode)
+
         if (currentAngle in state.capturedAngles) {
             val newCaptured = state.capturedAngles - currentAngle
             _captureState.update {
                 it.copy(capturedAngles = newCaptured, isGroupComplete = false)
+            }
+
+            val metadataList = _capturedMetadataList.value
+            val removeIndex = metadataList.indexOfFirst { meta ->
+                meta.fieldCode == curFieldCode &&
+                        meta.sampleCode == curSampleCode &&
+                        meta.angleCode == currentAngle
+            }
+            if (removeIndex >= 0) {
+                _capturedMetadataList.update { list ->
+                    list.filterIndexed { idx, _ -> idx != removeIndex }
+                }
+                _capturedFilePaths.update { paths ->
+                    paths.filterIndexed { idx, _ -> idx != removeIndex }
+                }
             }
         }
         _captureMessage.value = null

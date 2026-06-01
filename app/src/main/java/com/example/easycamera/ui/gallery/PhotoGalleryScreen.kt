@@ -386,10 +386,10 @@ fun PhotoGalleryScreen(
             title = { Text("目标已有照片") },
             text = {
                 Text(
-                    "目标田块 ${pendingNewFieldCode} 的样本 ${editingSampleCode} 已存在照片。\n\n" +
+                    "目标田块 ${pendingNewFieldCode} 已存在照片。\n\n" +
                             "请选择操作方式：\n" +
-                            "• 覆盖：删除目标位置现有照片，将当前照片移入\n" +
-                            "• 对调：将当前照片与目标位置照片的田块编号互换"
+                            "• 覆盖：删除目标田块所有照片，将当前田块照片移入\n" +
+                            "• 对调：将两个田块的所有照片编号互换"
                 )
             },
             confirmButton = {
@@ -404,7 +404,6 @@ fun PhotoGalleryScreen(
                             pendingNewFieldCode = ""
                             viewModel.swapFieldCode(
                                 oldFieldCode = editingFieldCode,
-                                sampleCode = editingSampleCode,
                                 newFieldCode = newCode
                             )
                         },

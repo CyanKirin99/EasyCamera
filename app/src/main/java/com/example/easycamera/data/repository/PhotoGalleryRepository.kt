@@ -27,14 +27,13 @@ class PhotoGalleryRepository(private val context: Context) {
     fun swapFieldCode(
         project: CaptureProject,
         fieldCodeA: String,
-        sampleCode: String,
         fieldCodeB: String
     ): Boolean {
         val imagesDir = File(project.imageDirPath)
         if (!imagesDir.exists()) return false
 
-        val prefixA = "${project.region}_${project.date}_${fieldCodeA}_${sampleCode}_"
-        val prefixB = "${project.region}_${project.date}_${fieldCodeB}_${sampleCode}_"
+        val prefixA = "${project.region}_${project.date}_${fieldCodeA}_"
+        val prefixB = "${project.region}_${project.date}_${fieldCodeB}_"
 
         // 1. Rename A files to temp
         val tempARenames = mutableListOf<Pair<File, File>>()

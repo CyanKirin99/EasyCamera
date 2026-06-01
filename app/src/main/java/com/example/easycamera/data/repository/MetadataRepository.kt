@@ -28,7 +28,6 @@ class MetadataRepository(private val context: Context) {
         region: String,
         date: String,
         fieldCodeA: String,
-        sampleCode: String,
         fieldCodeB: String
     ): Boolean {
         return try {
@@ -39,7 +38,7 @@ class MetadataRepository(private val context: Context) {
             if (allLines.isEmpty()) return true
 
             val updatedData = allLines.drop(1).map { row ->
-                if (row.size >= 12 && row[0] == region && row[1] == date && row[3] == sampleCode) {
+                if (row.size >= 12 && row[0] == region && row[1] == date) {
                     if (row[2] == fieldCodeA) {
                         val newFilename = row[9].replace("_${fieldCodeA}_", "_${fieldCodeB}_")
                         val newRelPath = row[10].replace("_${fieldCodeA}_", "_${fieldCodeB}_")
