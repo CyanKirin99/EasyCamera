@@ -122,6 +122,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    var onVolumeKeyCapture: (() -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -134,6 +136,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (event != null && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 &&
+            (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) &&
+            onVolumeKeyCapture != null
+        ) {
+            onVolumeKeyCapture?.invoke()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 }
 
@@ -381,30 +394,12 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
             }
         }
 
-        // 全局音量键监听：按音量+/-触发拍照
-        val activityContext = LocalContext.current
-        DisposableEffect(Unit) {
-            val activity = activityContext as? ComponentActivity
-            if (activity != null) {
-                val decorView = activity.window.decorView
-                val keyListener = View.OnKeyListener { _, keyCode, event ->
-                    if (event.action == KeyEvent.ACTION_DOWN &&
-                        (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
-                    ) {
-                        performCapture()
-                        true
-                    } else {
-                        false
-                    }
-                }
-                decorView.setOnKeyListener(keyListener)
-                decorView.isFocusable = true
-                decorView.requestFocus()
-                onDispose {
-                    decorView.setOnKeyListener(null)
-                }
-            } else {
-                onDispose { }
+        // 全局音量键监听：通过 Activity.onKeyDown 拦截，按音量+/-触发拍照
+        val mainActivity = LocalContext.current as? MainActivity
+        DisposableEffect(mainActivity) {
+            mainActivity?.onVolumeKeyCapture = performCapture
+            onDispose {
+                mainActivity?.onVolumeKeyCapture = null
             }
         }
 

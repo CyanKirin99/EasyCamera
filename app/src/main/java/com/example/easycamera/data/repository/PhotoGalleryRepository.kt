@@ -21,8 +21,10 @@ class PhotoGalleryRepository(private val context: Context) {
     }
 
     /**
-     * Swaps field codes A and B for all photos matching the given sample code in a project.
-     * Handles potential filename collisions by using temporary names.
+     * Swaps all photos between fieldCodeA and fieldCodeB across the entire project.
+     * Uses copy-to-backup strategy for safety: both field's files are copied to a
+     * temp directory, then originals are deleted, then backup copies are restored
+     * with swapped field code names. The entire operation rolls back on any failure.
      */
     fun swapFieldCode(
         project: CaptureProject,
@@ -35,65 +37,62 @@ class PhotoGalleryRepository(private val context: Context) {
         val prefixA = "${project.region}_${project.date}_${fieldCodeA}_"
         val prefixB = "${project.region}_${project.date}_${fieldCodeB}_"
 
-        // 1. Rename A files to temp
-        val tempARenames = mutableListOf<Pair<File, File>>()
-        imagesDir.listFiles()?.forEach { file ->
-            if (file.name.startsWith(prefixA) &&
+        // Collect all files for both field codes
+        val filesA = imagesDir.listFiles()?.filter { file ->
+            file.name.startsWith(prefixA) &&
                 (file.name.endsWith(".jpg", ignoreCase = true) ||
                     file.name.endsWith(".jpeg", ignoreCase = true))
-            ) {
-                val tempFile = File(imagesDir, "._swap_temp_A_${file.name}")
-                if (file.renameTo(tempFile)) {
-                    tempARenames.add(file to tempFile)
-                } else {
-                    // Rollback
-                    tempARenames.forEach { (orig, temp) -> temp.renameTo(orig) }
-                    return false
-                }
-            }
-        }
+        } ?: emptyList()
 
-        // 2. Rename B files to temp
-        val tempBRenames = mutableListOf<Pair<File, File>>()
-        imagesDir.listFiles()?.forEach { file ->
-            if (file.name.startsWith(prefixB) &&
+        val filesB = imagesDir.listFiles()?.filter { file ->
+            file.name.startsWith(prefixB) &&
                 (file.name.endsWith(".jpg", ignoreCase = true) ||
                     file.name.endsWith(".jpeg", ignoreCase = true))
-            ) {
-                val tempFile = File(imagesDir, "._swap_temp_B_${file.name}")
-                if (file.renameTo(tempFile)) {
-                    tempBRenames.add(file to tempFile)
-                } else {
-                    tempBRenames.forEach { (orig, temp) -> temp.renameTo(orig) }
-                    tempARenames.forEach { (orig, temp) -> temp.renameTo(orig) }
-                    return false
-                }
-            }
-        }
+        } ?: emptyList()
 
-        // 3. Rename temp A files to fieldCodeB
-        for ((origFile, tempFile) in tempARenames) {
-            val newName = origFile.name.replace("_${fieldCodeA}_", "_${fieldCodeB}_")
-            val newFile = File(imagesDir, newName)
-            if (!tempFile.renameTo(newFile)) {
-                tempFile.renameTo(origFile)
-                tempBRenames.forEach { (orig, temp) -> temp.renameTo(orig) }
-                return false
-            }
-        }
+        if (filesA.isEmpty() && filesB.isEmpty()) return false
 
-        // 4. Rename temp B files to fieldCodeA
-        for ((origFile, tempFile) in tempBRenames) {
-            val newName = origFile.name.replace("_${fieldCodeB}_", "_${fieldCodeA}_")
-            val newFile = File(imagesDir, newName)
-            if (!tempFile.renameTo(newFile)) {
-                tempFile.renameTo(origFile)
-                tempARenames.forEach { (orig, temp) -> temp.renameTo(orig) }
-                return false
-            }
-        }
+        // Create a temp backup directory outside imagesDir
+        val tempDir = File(imagesDir.parentFile, "._swap_backup_${System.currentTimeMillis()}")
+        if (!tempDir.mkdirs()) return false
 
-        return true
+        try {
+            // 1. Copy all fieldCodeA files to backup
+            for (file in filesA) {
+                file.copyTo(File(tempDir, file.name), overwrite = true)
+            }
+            // 2. Copy all fieldCodeB files to backup
+            for (file in filesB) {
+                file.copyTo(File(tempDir, file.name), overwrite = true)
+            }
+
+            // 3. Delete original files for both field codes
+            for (file in filesA) file.delete()
+            for (file in filesB) file.delete()
+
+            // 4. Restore fieldCodeA's backup with fieldCodeB naming
+            for (file in filesA) {
+                val newName = file.name.replace("_${fieldCodeA}_", "_${fieldCodeB}_")
+                File(tempDir, file.name).renameTo(File(imagesDir, newName))
+            }
+
+            // 5. Restore fieldCodeB's backup with fieldCodeA naming
+            for (file in filesB) {
+                val newName = file.name.replace("_${fieldCodeB}_", "_${fieldCodeA}_")
+                File(tempDir, file.name).renameTo(File(imagesDir, newName))
+            }
+
+            // 6. Cleanup temp dir
+            tempDir.deleteRecursively()
+            return true
+        } catch (e: Exception) {
+            // Rollback: restore everything from backup
+            tempDir.listFiles()?.forEach { backup ->
+                backup.renameTo(File(imagesDir, backup.name))
+            }
+            tempDir.deleteRecursively()
+            return false
+        }
     }
 
 
