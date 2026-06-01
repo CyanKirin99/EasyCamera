@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
+import android.view.KeyEvent
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -67,6 +69,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -80,11 +83,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -383,13 +381,15 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
             }
         }
 
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp)
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown &&
-                        (event.key == Key.VolumeUp || event.key == Key.VolumeDown)
+        // 全局音量键监听：按音量+/-触发拍照
+        val activityContext = LocalContext.current
+        DisposableEffect(Unit) {
+            val activity = activityContext as? ComponentActivity
+            if (activity != null) {
+                val decorView = activity.window.decorView
+                val keyListener = View.OnKeyListener { _, keyCode, event ->
+                    if (event.action == KeyEvent.ACTION_DOWN &&
+                        (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
                     ) {
                         performCapture()
                         true
@@ -397,6 +397,21 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                         false
                     }
                 }
+                decorView.setOnKeyListener(keyListener)
+                decorView.isFocusable = true
+                decorView.requestFocus()
+                onDispose {
+                    decorView.setOnKeyListener(null)
+                }
+            } else {
+                onDispose { }
+            }
+        }
+
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp)
         ) {
             CompactInfoBar(
                 sessionConfig = sessionConfig,
@@ -724,7 +739,6 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                     onClick = {
                         showOverwriteConfirmDialog = false
                         val match = overwriteExistingMatch
-                        val captured = pendingOverwriteDoCapture
                         overwriteExistingMatch = null
                         pendingOverwriteDoCapture = null
                         if (match != null) {
@@ -732,7 +746,6 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                             metadataRepository.deleteRecord(match.region, match.date, match.filename)
                         }
                         viewModel.forceAllowCaptureForCurrentAngle()
-                        captured?.invoke()
                     },
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(

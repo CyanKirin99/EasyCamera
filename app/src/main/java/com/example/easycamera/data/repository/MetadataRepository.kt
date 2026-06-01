@@ -24,6 +24,56 @@ class MetadataRepository(private val context: Context) {
         )
     }
 
+    fun swapFieldCode(
+        region: String,
+        date: String,
+        fieldCodeA: String,
+        sampleCode: String,
+        fieldCodeB: String
+    ): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return true
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return true
+
+            val updatedData = allLines.drop(1).map { row ->
+                if (row.size >= 12 && row[0] == region && row[1] == date && row[3] == sampleCode) {
+                    if (row[2] == fieldCodeA) {
+                        val newFilename = row[9].replace("_${fieldCodeA}_", "_${fieldCodeB}_")
+                        val newRelPath = row[10].replace("_${fieldCodeA}_", "_${fieldCodeB}_")
+                        val newFilePath = row[11].replace("_${fieldCodeA}_", "_${fieldCodeB}_")
+                        row.toMutableList().apply {
+                            this[2] = fieldCodeB
+                            this[9] = newFilename
+                            this[10] = newRelPath
+                            this[11] = newFilePath
+                        }
+                    } else if (row[2] == fieldCodeB) {
+                        val newFilename = row[9].replace("_${fieldCodeB}_", "_${fieldCodeA}_")
+                        val newRelPath = row[10].replace("_${fieldCodeB}_", "_${fieldCodeA}_")
+                        val newFilePath = row[11].replace("_${fieldCodeB}_", "_${fieldCodeA}_")
+                        row.toMutableList().apply {
+                            this[2] = fieldCodeA
+                            this[9] = newFilename
+                            this[10] = newRelPath
+                            this[11] = newFilePath
+                        }
+                    } else {
+                        row
+                    }
+                } else {
+                    row
+                }
+            }
+
+            return rewriteCsv(file, updatedData)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun getMetadataFile(region: String, date: String): File {
         val dir = File(
             context.getExternalFilesDir(null),

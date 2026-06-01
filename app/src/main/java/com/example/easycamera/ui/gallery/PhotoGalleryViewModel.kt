@@ -306,4 +306,40 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
             loadPhotosForProject(project)
         }
     }
+
+    /**
+     * Swaps field codes between [oldFieldCode] and [newFieldCode] for the given sample group.
+     * Both groups' photos are renamed and metadata updated to effectively swap their field codes.
+     */
+    fun swapFieldCode(oldFieldCode: String, sampleCode: String, newFieldCode: String) {
+        viewModelScope.launch {
+            val project = _uiState.value.selectedProject ?: return@launch
+            val result = withContext(Dispatchers.IO) {
+                val photosA = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == oldFieldCode && photo.sampleCode == sampleCode
+                }
+                val photosB = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == newFieldCode && photo.sampleCode == sampleCode
+                }
+
+                if (photosA.isEmpty() && photosB.isEmpty()) {
+                    return@withContext "没有找到要操作的照片"
+                }
+
+                val filesOk = repository.swapFieldCode(project, oldFieldCode, sampleCode, newFieldCode)
+                if (!filesOk) return@withContext "文件重命名失败，操作已回滚"
+
+                val metaOk = metadataRepository.swapFieldCode(
+                    region = project.region,
+                    date = project.date,
+                    fieldCodeA = oldFieldCode,
+                    sampleCode = sampleCode,
+                    fieldCodeB = newFieldCode
+                )
+                if (metaOk) "田块编号已对调" else "元数据更新失败"
+            }
+            _deleteMessage.value = result
+            loadPhotosForProject(project)
+        }
+    }
 }

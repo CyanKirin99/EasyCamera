@@ -20,6 +20,83 @@ class PhotoGalleryRepository(private val context: Context) {
         return file.renameTo(newFile)
     }
 
+    /**
+     * Swaps field codes A and B for all photos matching the given sample code in a project.
+     * Handles potential filename collisions by using temporary names.
+     */
+    fun swapFieldCode(
+        project: CaptureProject,
+        fieldCodeA: String,
+        sampleCode: String,
+        fieldCodeB: String
+    ): Boolean {
+        val imagesDir = File(project.imageDirPath)
+        if (!imagesDir.exists()) return false
+
+        val prefixA = "${project.region}_${project.date}_${fieldCodeA}_${sampleCode}_"
+        val prefixB = "${project.region}_${project.date}_${fieldCodeB}_${sampleCode}_"
+
+        // 1. Rename A files to temp
+        val tempARenames = mutableListOf<Pair<File, File>>()
+        imagesDir.listFiles()?.forEach { file ->
+            if (file.name.startsWith(prefixA) &&
+                (file.name.endsWith(".jpg", ignoreCase = true) ||
+                    file.name.endsWith(".jpeg", ignoreCase = true))
+            ) {
+                val tempFile = File(imagesDir, "._swap_temp_A_${file.name}")
+                if (file.renameTo(tempFile)) {
+                    tempARenames.add(file to tempFile)
+                } else {
+                    // Rollback
+                    tempARenames.forEach { (orig, temp) -> temp.renameTo(orig) }
+                    return false
+                }
+            }
+        }
+
+        // 2. Rename B files to temp
+        val tempBRenames = mutableListOf<Pair<File, File>>()
+        imagesDir.listFiles()?.forEach { file ->
+            if (file.name.startsWith(prefixB) &&
+                (file.name.endsWith(".jpg", ignoreCase = true) ||
+                    file.name.endsWith(".jpeg", ignoreCase = true))
+            ) {
+                val tempFile = File(imagesDir, "._swap_temp_B_${file.name}")
+                if (file.renameTo(tempFile)) {
+                    tempBRenames.add(file to tempFile)
+                } else {
+                    tempBRenames.forEach { (orig, temp) -> temp.renameTo(orig) }
+                    tempARenames.forEach { (orig, temp) -> temp.renameTo(orig) }
+                    return false
+                }
+            }
+        }
+
+        // 3. Rename temp A files to fieldCodeB
+        for ((origFile, tempFile) in tempARenames) {
+            val newName = origFile.name.replace("_${fieldCodeA}_", "_${fieldCodeB}_")
+            val newFile = File(imagesDir, newName)
+            if (!tempFile.renameTo(newFile)) {
+                tempFile.renameTo(origFile)
+                tempBRenames.forEach { (orig, temp) -> temp.renameTo(orig) }
+                return false
+            }
+        }
+
+        // 4. Rename temp B files to fieldCodeA
+        for ((origFile, tempFile) in tempBRenames) {
+            val newName = origFile.name.replace("_${fieldCodeB}_", "_${fieldCodeA}_")
+            val newFile = File(imagesDir, newName)
+            if (!tempFile.renameTo(newFile)) {
+                tempFile.renameTo(origFile)
+                tempARenames.forEach { (orig, temp) -> temp.renameTo(orig) }
+                return false
+            }
+        }
+
+        return true
+    }
+
 
     fun scanProjects(): List<CaptureProject> {
         val root = easyCameraRoot

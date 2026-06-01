@@ -383,32 +383,56 @@ fun PhotoGalleryScreen(
                 pendingNewFieldCode = ""
             },
             shape = RoundedCornerShape(12.dp),
-            title = { Text("确认覆盖") },
+            title = { Text("目标已有照片") },
             text = {
                 Text(
                     "目标田块 ${pendingNewFieldCode} 的样本 ${editingSampleCode} 已存在照片。\n\n" +
-                            "覆盖后，目标位置的现有照片将被删除，当前照片将移入。"
+                            "请选择操作方式：\n" +
+                            "• 覆盖：删除目标位置现有照片，将当前照片移入\n" +
+                            "• 对调：将当前照片与目标位置照片的田块编号互换"
                 )
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        showOverwriteFieldConfirm = false
-                        val newCode = pendingNewFieldCode
-                        pendingNewFieldCode = ""
-                        viewModel.modifyFieldCode(
-                            oldFieldCode = editingFieldCode,
-                            sampleCode = editingSampleCode,
-                            newFieldCode = newCode,
-                            overwriteDestination = true
-                        )
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("覆盖")
+                    Button(
+                        onClick = {
+                            showOverwriteFieldConfirm = false
+                            val newCode = pendingNewFieldCode
+                            pendingNewFieldCode = ""
+                            viewModel.swapFieldCode(
+                                oldFieldCode = editingFieldCode,
+                                sampleCode = editingSampleCode,
+                                newFieldCode = newCode
+                            )
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("对调")
+                    }
+                    Button(
+                        onClick = {
+                            showOverwriteFieldConfirm = false
+                            val newCode = pendingNewFieldCode
+                            pendingNewFieldCode = ""
+                            viewModel.modifyFieldCode(
+                                oldFieldCode = editingFieldCode,
+                                sampleCode = editingSampleCode,
+                                newFieldCode = newCode,
+                                overwriteDestination = true
+                            )
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("覆盖")
+                    }
                 }
             },
             dismissButton = {
