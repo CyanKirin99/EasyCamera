@@ -422,6 +422,20 @@ class CaptureViewModel : ViewModel() {
         return true
     }
 
+    /** Force-removes the current angle from capturedAngles so tryStartCapture will allow capture. */
+    fun forceAllowCaptureForCurrentAngle() {
+        val state = _captureState.value
+        val config = _sessionConfig.value
+        val currentAngle = config.angleSequence.getOrElse(state.currentAngleIndex) { return }
+        if (currentAngle in state.capturedAngles) {
+            val newCaptured = state.capturedAngles - currentAngle
+            _captureState.update {
+                it.copy(capturedAngles = newCaptured, isGroupComplete = false)
+            }
+        }
+        _captureMessage.value = null
+    }
+
     // Group actions
     fun confirmGroup() {
         _captureState.update { CaptureCodeManager.confirmGroup(it) }
@@ -436,6 +450,40 @@ class CaptureViewModel : ViewModel() {
         _capturedFilePaths.value = emptyList()
         _captureMessage.value = null
         _codeLockMessage.value = null
+    }
+
+    data class UndoInfo(
+        val filePath: String,
+        val metadata: CaptureMetadata
+    )
+
+    /** Removes the last captured photo from state and returns info needed to clean up disk/DB. */
+    fun undoLastCapture(): UndoInfo? {
+        val state = _captureState.value
+        val config = _sessionConfig.value
+        val metadataList = _capturedMetadataList.value
+        val filePaths = _capturedFilePaths.value
+
+        if (metadataList.isEmpty() || filePaths.isEmpty()) return null
+
+        val lastMetadata = metadataList.last()
+        val lastFilePath = filePaths.last()
+
+        _capturedMetadataList.update { it.dropLast(1) }
+        _capturedFilePaths.update { it.dropLast(1) }
+
+        val newCapturedAngles = state.capturedAngles - lastMetadata.angleCode
+        val angleIndex = config.angleSequence.indexOf(lastMetadata.angleCode).coerceAtLeast(0)
+        _captureState.value = state.copy(
+            capturedAngles = newCapturedAngles,
+            currentAngleIndex = angleIndex,
+            isGroupComplete = false
+        )
+        _captureMessage.value = null
+        _isCapturing.value = false
+        _codeLockMessage.value = null
+
+        return UndoInfo(filePath = lastFilePath, metadata = lastMetadata)
     }
 
     data class CaptureAngleInfo(

@@ -72,7 +72,6 @@ class MetadataRepository(private val context: Context) {
             val allLines = CsvUtils.readAllLines(file)
             if (allLines.isEmpty()) return true
 
-            val headerLine = allLines.first()
             val dataLines = allLines.drop(1)
 
             val filteredData = dataLines.filter { row ->
@@ -83,17 +82,85 @@ class MetadataRepository(private val context: Context) {
                 !(rowRegion == region && rowDate == date && rowField == fieldCode && rowSample == sampleCode)
             }
 
-            val headerOk = CsvUtils.writeHeader(file, HEADERS)
-            if (!headerOk) return false
-
-            for (row in filteredData) {
-                val ok = CsvUtils.appendLine(file, row)
-                if (!ok) return false
-            }
-
-            true
+            return rewriteCsv(file, filteredData)
         } catch (e: Exception) {
             false
         }
+    }
+
+    /** Deletes a single metadata record matching by filename (unique within a project). */
+    fun deleteRecord(region: String, date: String, filename: String): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return true
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return true
+
+            val filteredData = allLines.drop(1).filter { row ->
+                row.getOrElse(9) { "" } != filename
+            }
+
+            return rewriteCsv(file, filteredData)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Updates the field_code column and file path info for all records matching
+     * (region, date, oldFieldCode, sampleCode) to use newFieldCode instead.
+     */
+    fun updateFieldCode(
+        region: String,
+        date: String,
+        oldFieldCode: String,
+        sampleCode: String,
+        newFieldCode: String
+    ): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return true
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return true
+
+            val updatedData = allLines.drop(1).map { row ->
+                if (row.size >= 12 &&
+                    row[0] == region &&
+                    row[1] == date &&
+                    row[2] == oldFieldCode &&
+                    row[3] == sampleCode
+                ) {
+                    val oldFilename = row[9]
+                    val newFilename = oldFilename.replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                    val oldRelPath = row[10]
+                    val newRelPath = oldRelPath.replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                    val oldFilePath = row[11]
+                    val newFilePath = oldFilePath.replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                    row.toMutableList().apply {
+                        this[2] = newFieldCode
+                        this[9] = newFilename
+                        this[10] = newRelPath
+                        this[11] = newFilePath
+                    }
+                } else {
+                    row
+                }
+            }
+
+            return rewriteCsv(file, updatedData)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun rewriteCsv(file: File, dataLines: List<List<String>>): Boolean {
+        val headerOk = CsvUtils.writeHeader(file, HEADERS)
+        if (!headerOk) return false
+        for (row in dataLines) {
+            if (!CsvUtils.appendLine(file, row)) return false
+        }
+        return true
     }
 }

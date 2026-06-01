@@ -11,6 +11,16 @@ class PhotoGalleryRepository(private val context: Context) {
     private val easyCameraRoot: File
         get() = File(context.getExternalFilesDir(null), "EasyCamera")
 
+    fun updateFieldCode(photo: CapturedPhoto, newFieldCode: String): Boolean {
+        val file = File(photo.filePath)
+        if (!file.exists()) return false
+        val parentDir = file.parentFile ?: return false
+        val newFileName = "${photo.region}_${photo.date}_${newFieldCode}_${photo.sampleCode}_${photo.angleCode}_${photo.longitude}_${photo.latitude}.jpg"
+        val newFile = File(parentDir, newFileName)
+        return file.renameTo(newFile)
+    }
+
+
     fun scanProjects(): List<CaptureProject> {
         val root = easyCameraRoot
         if (!root.exists() || !root.isDirectory) return emptyList()

@@ -247,4 +247,63 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
     fun clearDeleteMessage() {
         _deleteMessage.value = null
     }
+
+    /** Checks if the target field+sample combination already has photos in the current project. */
+    fun checkFieldSampleConflict(fieldCode: String, sampleCode: String): Boolean {
+        val project = _uiState.value.selectedProject ?: return false
+        return _uiState.value.photos.any { photo ->
+            photo.fieldCode == fieldCode && photo.sampleCode == sampleCode
+        }
+    }
+
+    /**
+     * Modifies the field code for a sample group. If [overwriteDestination] is true,
+     * conflicting photos at the destination will be deleted first.
+     */
+    fun modifyFieldCode(
+        oldFieldCode: String,
+        sampleCode: String,
+        newFieldCode: String,
+        overwriteDestination: Boolean
+    ) {
+        viewModelScope.launch {
+            val project = _uiState.value.selectedProject ?: return@launch
+            val result = withContext(Dispatchers.IO) {
+                val photosToModify = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == oldFieldCode && photo.sampleCode == sampleCode
+                }
+                if (photosToModify.isEmpty()) return@withContext "没有找到要修改的照片"
+
+                if (overwriteDestination) {
+                    val conflicted = _uiState.value.photos.filter { photo ->
+                        photo.fieldCode == newFieldCode && photo.sampleCode == sampleCode
+                    }
+                    for (photo in conflicted) {
+                        try { File(photo.filePath).delete() } catch (_: Exception) { }
+                        metadataRepository.deleteRecord(photo.region, photo.date, photo.filename)
+                    }
+                }
+
+                var allOk = true
+                for (photo in photosToModify) {
+                    val repo = PhotoGalleryRepository(getApplication())
+                    if (!repo.updateFieldCode(photo, newFieldCode)) {
+                        allOk = false
+                    }
+                }
+                if (allOk) {
+                    metadataRepository.updateFieldCode(
+                        region = project.region,
+                        date = project.date,
+                        oldFieldCode = oldFieldCode,
+                        sampleCode = sampleCode,
+                        newFieldCode = newFieldCode
+                    )
+                }
+                if (allOk) "田块编号已更新" else "部分操作失败"
+            }
+            _deleteMessage.value = result
+            loadPhotosForProject(project)
+        }
+    }
 }

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -61,9 +63,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -128,6 +132,14 @@ fun PhotoGalleryScreen(
     }
 
     var showDeleteProjectConfirm by remember { mutableStateOf(false) }
+
+    var showFieldEditDialog by remember { mutableStateOf(false) }
+    var editingFieldCode by remember { mutableStateOf("") }
+    var editingSampleCode by remember { mutableStateOf("") }
+    var fieldEditNewValue by remember { mutableStateOf("") }
+    var fieldEditError by remember { mutableStateOf<String?>(null) }
+    var showOverwriteFieldConfirm by remember { mutableStateOf(false) }
+    var pendingNewFieldCode by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -227,6 +239,13 @@ fun PhotoGalleryScreen(
                                 onDeleteSample = { fieldCode, sampleCode ->
                                     viewModel.deleteSampleGroup(fieldCode, sampleCode)
                                 },
+                                onEditFieldCode = { fieldCode, sampleCode ->
+                                    editingFieldCode = fieldCode
+                                    editingSampleCode = sampleCode
+                                    fieldEditNewValue = fieldCode
+                                    fieldEditError = null
+                                    showFieldEditDialog = true
+                                },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -275,6 +294,128 @@ fun PhotoGalleryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteProjectConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showFieldEditDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showFieldEditDialog = false
+                fieldEditError = null
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("修改田块编号") },
+            text = {
+                Column {
+                    Text(
+                        text = "当前样本组：${editingFieldCode}_${editingSampleCode}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = fieldEditNewValue,
+                        onValueChange = {
+                            if (it.length <= 2) {
+                                fieldEditNewValue = it
+                                fieldEditError = null
+                            }
+                        },
+                        label = { Text("新田块编号 (1-99)") },
+                        singleLine = true,
+                        isError = fieldEditError != null,
+                        supportingText = if (fieldEditError != null) {
+                            { Text(fieldEditError!!, color = MaterialTheme.colorScheme.error) }
+                        } else null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val newCode = fieldEditNewValue.trim().padStart(2, '0')
+                        if (newCode.length < 1 || newCode.toIntOrNull() == null || newCode.toInt() !in 1..99) {
+                            fieldEditError = "请输入有效的编号（1-99）"
+                            return@Button
+                        }
+                        if (newCode == editingFieldCode.padStart(2, '0')) {
+                            showFieldEditDialog = false
+                            return@Button
+                        }
+                        if (viewModel.checkFieldSampleConflict(newCode, editingSampleCode)) {
+                            pendingNewFieldCode = newCode
+                            showFieldEditDialog = false
+                            showOverwriteFieldConfirm = true
+                        } else {
+                            showFieldEditDialog = false
+                            viewModel.modifyFieldCode(
+                                oldFieldCode = editingFieldCode,
+                                sampleCode = editingSampleCode,
+                                newFieldCode = newCode,
+                                overwriteDestination = false
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("确认")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showFieldEditDialog = false
+                    fieldEditError = null
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showOverwriteFieldConfirm) {
+        AlertDialog(
+            onDismissRequest = {
+                showOverwriteFieldConfirm = false
+                pendingNewFieldCode = ""
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("确认覆盖") },
+            text = {
+                Text(
+                    "目标田块 ${pendingNewFieldCode} 的样本 ${editingSampleCode} 已存在照片。\n\n" +
+                            "覆盖后，目标位置的现有照片将被删除，当前照片将移入。"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showOverwriteFieldConfirm = false
+                        val newCode = pendingNewFieldCode
+                        pendingNewFieldCode = ""
+                        viewModel.modifyFieldCode(
+                            oldFieldCode = editingFieldCode,
+                            sampleCode = editingSampleCode,
+                            newFieldCode = newCode,
+                            overwriteDestination = true
+                        )
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("覆盖")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showOverwriteFieldConfirm = false
+                    pendingNewFieldCode = ""
+                }) {
                     Text("取消")
                 }
             }
@@ -416,6 +557,7 @@ fun organizePhotos(photos: List<CapturedPhoto>): List<FieldDisplay> {
 fun PhotoGrid(
     fields: List<FieldDisplay>,
     onDeleteSample: (String, String) -> Unit,
+    onEditFieldCode: (String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var previewPhoto by remember { mutableStateOf<CapturedPhoto?>(null) }
@@ -430,7 +572,8 @@ fun PhotoGrid(
                 FieldSection(
                     field = field,
                     onPhotoClick = { photo -> previewPhoto = photo },
-                    onDeleteSample = onDeleteSample
+                    onDeleteSample = onDeleteSample,
+                    onEditFieldCode = onEditFieldCode
                 )
             }
         }
@@ -448,7 +591,8 @@ fun PhotoGrid(
 fun FieldSection(
     field: FieldDisplay,
     onPhotoClick: (CapturedPhoto) -> Unit,
-    onDeleteSample: (String, String) -> Unit
+    onDeleteSample: (String, String) -> Unit,
+    onEditFieldCode: (String, String) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -456,12 +600,25 @@ fun FieldSection(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "田块 ${field.fieldCode}",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "田块 ${field.fieldCode}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(
+                    onClick = {
+                        field.samples.firstOrNull()?.let { sample ->
+                            onEditFieldCode(field.fieldCode, sample.sampleCode)
+                        }
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text("编辑田块", fontSize = 12.sp)
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 

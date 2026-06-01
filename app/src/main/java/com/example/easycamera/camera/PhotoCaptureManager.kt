@@ -1,6 +1,7 @@
 package com.example.easycamera.camera
 
 import android.content.Context
+import android.media.MediaActionSound
 import android.view.ViewGroup
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageCapture
@@ -93,6 +94,7 @@ fun takePhoto(
 ) {
     outputFile.parentFile?.mkdirs()
     val outputOptions = ImageCapture.OutputFileOptions.Builder(outputFile).build()
+    MediaActionSound().play(MediaActionSound.SHUTTER_CLICK)
     imageCapture.takePicture(
         outputOptions,
         ContextCompat.getMainExecutor(context),

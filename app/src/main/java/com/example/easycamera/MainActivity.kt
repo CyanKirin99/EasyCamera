@@ -80,6 +80,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -267,6 +272,12 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
     var showNAWarningDialog by remember { mutableStateOf(false) }
     var pendingNAConfirm by remember { mutableStateOf<(() -> Unit)?>(null) }
 
+    var showRetakeConfirmDialog by remember { mutableStateOf(false) }
+
+    var showOverwriteConfirmDialog by remember { mutableStateOf(false) }
+    var pendingOverwriteDoCapture by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var overwriteExistingMatch by remember { mutableStateOf<CaptureMetadata?>(null) }
+
     val locationText by viewModel.locationStatus.collectAsState()
     val locationDetermined by viewModel.locationDetermined.collectAsState()
     val isLocationNA = remember(locationText) {
@@ -305,10 +316,87 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
         } else {
         BackHandler { showExitConfirm = true }
 
+        val performCapture = {
+            val ic = imageCaptureState.value
+            if (ic != null && !captureState.isGroupComplete && !isCapturing) {
+                val doCapture: () -> Unit = {
+                    if (viewModel.tryStartCapture()) {
+                        val dir = File(
+                            context.getExternalFilesDir(null),
+                            "EasyCamera/${sessionConfig.region}_${sessionConfig.date}/images"
+                        )
+                        val file = File(dir, viewModel.previewFileName)
+                        takePhoto(
+                            imageCapture = ic,
+                            context = context,
+                            outputFile = file,
+                            onSuccess = {
+                                val previewFile = File(context.cacheDir, "preview_${file.name}")
+                                try {
+                                    file.copyTo(previewFile, overwrite = true)
+                                } catch (_: Exception) { }
+                                capturedPreviewPath = previewFile.absolutePath
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val rotationOk = ImageRotationUtils.rotateJpegIfNeeded(file)
+                                    withContext(Dispatchers.Main) {
+                                        viewModel.onPhotoCaptured(file.absolutePath) { metadata ->
+                                            val ok = metadataRepository.appendRecord(metadata)
+                                            if (!ok) metadataWriteFailed = true
+                                        }
+                                        if (!rotationOk) {
+                                            viewModel.setCaptureMessage("照片已保存，但方向处理失败。")
+                                        }
+                                    }
+                                }
+                            },
+                            onError = { msg ->
+                                viewModel.onPhotoCaptureError(msg)
+                            }
+                        )
+                    }
+                }
+
+                val config = sessionConfig
+                val curFieldCode = CaptureCodeManager.formatCode(captureState.fieldCode)
+                val curSampleCode = CaptureCodeManager.formatCode(captureState.sampleCode)
+                val curAngleCode = config.angleSequence.getOrElse(captureState.currentAngleIndex) { "?" }
+                val existingMatch = capturedMetadataList.find { meta ->
+                    meta.fieldCode == curFieldCode &&
+                            meta.sampleCode == curSampleCode &&
+                            meta.angleCode == curAngleCode
+                }
+                val dir = File(
+                    context.getExternalFilesDir(null),
+                    "EasyCamera/${config.region}_${config.date}/images"
+                )
+                val outputFile = File(dir, viewModel.previewFileName)
+                if (existingMatch != null || outputFile.exists()) {
+                    overwriteExistingMatch = existingMatch
+                    pendingOverwriteDoCapture = doCapture
+                    showOverwriteConfirmDialog = true
+                } else if ((!locationDetermined || isLocationNA) && !dontShowNAWarning) {
+                    pendingNAConfirm = doCapture
+                    showNAWarningDialog = true
+                } else {
+                    doCapture()
+                }
+            }
+        }
+
         Column(
             modifier = modifier
                 .fillMaxSize()
                 .padding(horizontal = 12.dp)
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown &&
+                        (event.key == Key.VolumeUp || event.key == Key.VolumeDown)
+                    ) {
+                        performCapture()
+                        true
+                    } else {
+                        false
+                    }
+                }
         ) {
             CompactInfoBar(
                 sessionConfig = sessionConfig,
@@ -392,8 +480,10 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                     )
                     Image(
                         painter = painter,
-                        contentDescription = "已拍摄照片",
-                        modifier = Modifier.fillMaxSize(),
+                        contentDescription = "已拍摄照片，点击重拍",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { showRetakeConfirmDialog = true },
                         contentScale = ContentScale.Crop
                     )
                 }
@@ -467,57 +557,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                     )
 
                     Button(
-                        onClick = {
-                            val imageCapture = imageCaptureState.value
-                            if (imageCapture == null) return@Button
-
-                            val doCapture: () -> Unit = {
-                                if (viewModel.tryStartCapture()) {
-                                    val dir = File(
-                                        context.getExternalFilesDir(null),
-                                        "EasyCamera/${sessionConfig.region}_${sessionConfig.date}/images"
-                                    )
-                                    val file = File(dir, viewModel.previewFileName)
-
-                                    takePhoto(
-                                        imageCapture = imageCapture,
-                                        context = context,
-                                        outputFile = file,
-                                        onSuccess = {
-                                            val previewFile = File(context.cacheDir, "preview_${file.name}")
-                                            try {
-                                                file.copyTo(previewFile, overwrite = true)
-                                            } catch (_: Exception) {
-                                                // fallback
-                                            }
-                                            capturedPreviewPath = previewFile.absolutePath
-                                            coroutineScope.launch(Dispatchers.IO) {
-                                                val rotationOk = ImageRotationUtils.rotateJpegIfNeeded(file)
-                                                withContext(Dispatchers.Main) {
-                                                    viewModel.onPhotoCaptured(file.absolutePath) { metadata ->
-                                                        val ok = metadataRepository.appendRecord(metadata)
-                                                        if (!ok) metadataWriteFailed = true
-                                                    }
-                                                    if (!rotationOk) {
-                                                        viewModel.setCaptureMessage("照片已保存，但方向处理失败。")
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        onError = { msg ->
-                                            viewModel.onPhotoCaptureError(msg)
-                                        }
-                                    )
-                                }
-                            }
-
-                            if ((!locationDetermined || isLocationNA) && !dontShowNAWarning) {
-                                pendingNAConfirm = doCapture
-                                showNAWarningDialog = true
-                            } else {
-                                doCapture()
-                            }
-                        },
+                        onClick = { performCapture() },
                         modifier = Modifier
                             .weight(0.65f)
                             .graphicsLayer(scaleX = captureScale, scaleY = captureScale),
@@ -611,6 +651,102 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                 TextButton(onClick = {
                     showNAWarningDialog = false
                     pendingNAConfirm = null
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showRetakeConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showRetakeConfirmDialog = false },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("确认重拍") },
+            text = {
+                Text(
+                    "确定要重新拍摄当前角度吗？\n\n" +
+                            "当前照片将被删除，相机将回到该角度的拍摄状态。"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRetakeConfirmDialog = false
+                        val undoInfo = viewModel.undoLastCapture()
+                        if (undoInfo != null) {
+                            val oldPreviewPath = capturedPreviewPath
+                            capturedPreviewPath = null
+                            if (oldPreviewPath != null && oldPreviewPath.startsWith(context.cacheDir.absolutePath)) {
+                                try { File(oldPreviewPath).delete() } catch (_: Exception) { }
+                            }
+                            try { File(undoInfo.filePath).delete() } catch (_: Exception) { }
+                            metadataRepository.deleteRecord(
+                                region = sessionConfig.region,
+                                date = sessionConfig.date,
+                                filename = undoInfo.metadata.filename
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("重拍")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRetakeConfirmDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showOverwriteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showOverwriteConfirmDialog = false
+                pendingOverwriteDoCapture = null
+                overwriteExistingMatch = null
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("确认覆盖") },
+            text = {
+                Text(
+                    "该田块 + 样本 + 角度的照片已存在，确定要覆盖吗？\n\n" +
+                            "原有照片将被删除并重新拍摄。"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showOverwriteConfirmDialog = false
+                        val match = overwriteExistingMatch
+                        val captured = pendingOverwriteDoCapture
+                        overwriteExistingMatch = null
+                        pendingOverwriteDoCapture = null
+                        if (match != null) {
+                            try { File(match.filePath).delete() } catch (_: Exception) { }
+                            metadataRepository.deleteRecord(match.region, match.date, match.filename)
+                        }
+                        viewModel.forceAllowCaptureForCurrentAngle()
+                        captured?.invoke()
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("覆盖")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showOverwriteConfirmDialog = false
+                    pendingOverwriteDoCapture = null
+                    overwriteExistingMatch = null
                 }) {
                     Text("取消")
                 }
