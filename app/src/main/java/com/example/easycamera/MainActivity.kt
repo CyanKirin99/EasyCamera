@@ -87,6 +87,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1373,8 +1374,7 @@ fun CompactBottomBar(
                 text = previewFileName,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                lineHeight = 16.sp,
                 modifier = Modifier.weight(1f)
             )
 
@@ -1403,6 +1403,7 @@ fun CompactBottomBar(
 fun FieldEditDialog(viewModel: CaptureViewModel) {
     val editText by viewModel.fieldEditText.collectAsState()
     val editError by viewModel.fieldEditError.collectAsState()
+    val captureState by viewModel.captureState.collectAsState()
 
     AlertDialog(
         onDismissRequest = { viewModel.closeFieldEditDialog() },
@@ -1410,20 +1411,64 @@ fun FieldEditDialog(viewModel: CaptureViewModel) {
         title = { Text("手动修改田块编号") },
         text = {
             Column {
-                OutlinedTextField(
-                    value = editText,
-                    onValueChange = { viewModel.updateFieldEditText(it) },
-                    label = { Text("请输入田块编号 (1-99)") },
-                    singleLine = true,
-                    isError = editError != null,
-                    supportingText = if (editError != null) {
-                        { Text(editError!!, color = MaterialTheme.colorScheme.error) }
-                    } else {
-                        null
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    text = "当前田块编号：${CaptureCodeManager.formatCode(captureState.fieldCode)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
                 )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "目标田块编号：",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val current = editText.toIntOrNull() ?: 1
+                            if (current > 1) {
+                                viewModel.updateFieldEditText((current - 1).toString())
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Text("−", fontSize = 20.sp)
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = editText.padStart(2, '0'),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.width(48.dp),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    OutlinedButton(
+                        onClick = {
+                            val current = editText.toIntOrNull() ?: 1
+                            if (current < 99) {
+                                viewModel.updateFieldEditText((current + 1).toString())
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Text("+", fontSize = 20.sp)
+                    }
+                }
+                if (editError != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = editError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
         },
         confirmButton = {

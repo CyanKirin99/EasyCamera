@@ -209,8 +209,11 @@ fun PhotoGalleryScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    val photoCount = uiState.photos.size
+                    val fieldCount = uiState.photos.map { it.fieldCode }.distinct().size
+                    val sampleCount = uiState.photos.map { "${it.fieldCode}_${it.sampleCode}" }.distinct().size
                     Text(
-                        text = "照片数量：${selectedProject.photoCount}",
+                        text = "田块: $fieldCount    样本: $sampleCount    照片: $photoCount",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -311,27 +314,65 @@ fun PhotoGalleryScreen(
             text = {
                 Column {
                     Text(
-                        text = "当前样本组：${editingFieldCode}_${editingSampleCode}",
+                        text = "当前田块编号：${editingFieldCode}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "目标田块编号：",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = fieldEditNewValue,
-                        onValueChange = {
-                            if (it.length <= 2) {
-                                fieldEditNewValue = it
-                                fieldEditError = null
-                            }
-                        },
-                        label = { Text("新田块编号 (1-99)") },
-                        singleLine = true,
-                        isError = fieldEditError != null,
-                        supportingText = if (fieldEditError != null) {
-                            { Text(fieldEditError!!, color = MaterialTheme.colorScheme.error) }
-                        } else null,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
                         modifier = Modifier.fillMaxWidth()
-                    )
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val current = fieldEditNewValue.toIntOrNull() ?: 1
+                                if (current > 1) {
+                                    fieldEditNewValue = (current - 1).toString().padStart(2, '0')
+                                    fieldEditError = null
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Text("−", fontSize = 20.sp)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = fieldEditNewValue.padStart(2, '0'),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(48.dp),
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val current = fieldEditNewValue.toIntOrNull() ?: 1
+                                if (current < 99) {
+                                    fieldEditNewValue = (current + 1).toString().padStart(2, '0')
+                                    fieldEditError = null
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Text("+", fontSize = 20.sp)
+                        }
+                    }
+                    if (fieldEditError != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = fieldEditError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             },
             confirmButton = {
