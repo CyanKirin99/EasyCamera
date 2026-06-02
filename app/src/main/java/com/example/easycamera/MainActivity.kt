@@ -35,10 +35,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -588,7 +584,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                 progressLabel = viewModel.progressLabel
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Optional sample info fields: Bbch and Plant Height
             Row(
@@ -620,7 +616,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                 )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             if (captureState.isGroupComplete) {
                 // CompactGroupConfirmContent already has retake/confirm buttons
@@ -959,7 +955,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
 }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CompactInfoBar(
     sessionConfig: CaptureSessionConfig,
@@ -979,25 +975,26 @@ fun CompactInfoBar(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        FlowRow(
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Box {
+            Box(modifier = Modifier.weight(1f)) {
                 AssistChip(
                     onClick = { regionExpanded = true },
                     label = {
                         Text(
                             if (sessionConfig.region.isNotEmpty()) sessionConfig.region else "请选择",
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     },
-                    leadingIcon = { Text("地区", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier.fillMaxWidth().height(36.dp)
                 )
                 DropdownMenu(
                     expanded = regionExpanded,
@@ -1020,7 +1017,7 @@ fun CompactInfoBar(
             val dateSdf = remember { SimpleDateFormat("yyMMdd", Locale.getDefault()) }
             val displaySdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
 
-            Box {
+            Box(modifier = Modifier.weight(1f)) {
                 val parsedDate = remember(sessionConfig.date) {
                     try { dateSdf.parse(sessionConfig.date) } catch (_: Exception) { null }
                 }
@@ -1030,12 +1027,13 @@ fun CompactInfoBar(
                     label = {
                         Text(
                             if (parsedDate != null) displaySdf.format(parsedDate) else sessionConfig.date,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     },
-                    leadingIcon = { Text("日期", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier.fillMaxWidth().height(36.dp)
                 )
             }
 
@@ -1086,19 +1084,19 @@ fun CompactInfoBar(
                 }
             }
 
-            Box {
+            Box(modifier = Modifier.weight(1f)) {
                 AssistChip(
                     onClick = { operatorExpanded = true },
                     label = {
                         Text(
                             if (sessionConfig.operator.isNotEmpty()) sessionConfig.operator else "请选择",
                             fontSize = 14.sp,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     },
-                    leadingIcon = { Text("拍摄人", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier.fillMaxWidth().height(36.dp)
                 )
                 DropdownMenu(
                     expanded = operatorExpanded,
@@ -1164,61 +1162,65 @@ fun CompactCodeAngleBar(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 RoundedCornerShape(10.dp)
             )
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("田块", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("田块", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(
                     onClick = onDecrementField,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                    modifier = Modifier.height(24.dp)
-                ) { Text("-", fontSize = 16.sp) }
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                    modifier = Modifier.size(24.dp)
+                ) { Text("−", fontSize = 14.sp) }
                 Text(
                     text = CaptureCodeManager.formatCode(captureState.fieldCode),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    modifier = Modifier.padding(horizontal = 2.dp)
                 )
                 TextButton(
                     onClick = onIncrementField,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                    modifier = Modifier.height(24.dp)
-                ) { Text("+", fontSize = 16.sp) }
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                    modifier = Modifier.size(24.dp)
+                ) { Text("+", fontSize = 14.sp) }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("样本", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("样本", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(
                     onClick = onDecrementSample,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                    modifier = Modifier.height(24.dp)
-                ) { Text("-", fontSize = 16.sp) }
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                    modifier = Modifier.size(24.dp)
+                ) { Text("−", fontSize = 14.sp) }
                 Text(
                     text = CaptureCodeManager.formatCode(captureState.sampleCode),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    modifier = Modifier.padding(horizontal = 2.dp)
                 )
                 TextButton(
                     onClick = onIncrementSample,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                    modifier = Modifier.height(24.dp)
-                ) { Text("+", fontSize = 16.sp) }
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                    modifier = Modifier.size(24.dp)
+                ) { Text("+", fontSize = 14.sp) }
             }
 
             Text(
                 text = progressLabel,
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Bold
             )
         }
 
