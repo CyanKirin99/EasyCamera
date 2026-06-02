@@ -35,6 +35,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -955,7 +959,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
 }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CompactInfoBar(
     sessionConfig: CaptureSessionConfig,
@@ -973,165 +977,172 @@ fun CompactInfoBar(
     var regionExpanded by remember { mutableStateOf(false) }
     var operatorExpanded by remember { mutableStateOf(false) }
 
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Box {
-            AssistChip(
-                onClick = { regionExpanded = true },
-                label = {
-                    Text(
-                        if (sessionConfig.region.isNotEmpty()) sessionConfig.region else "请选择",
-                        fontSize = 14.sp
-                    )
-                },
-                leadingIcon = { Text("地区", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(36.dp)
-            )
-            DropdownMenu(
-                expanded = regionExpanded,
-                onDismissRequest = { regionExpanded = false },
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                regionOptions.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option) },
-                        onClick = {
-                            regionExpanded = false
-                            if (option != sessionConfig.region) onRegionSelected(option)
-                        }
-                    )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box {
+                AssistChip(
+                    onClick = { regionExpanded = true },
+                    label = {
+                        Text(
+                            if (sessionConfig.region.isNotEmpty()) sessionConfig.region else "请选择",
+                            fontSize = 14.sp
+                        )
+                    },
+                    leadingIcon = { Text("地区", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.height(36.dp)
+                )
+                DropdownMenu(
+                    expanded = regionExpanded,
+                    onDismissRequest = { regionExpanded = false },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    regionOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                regionExpanded = false
+                                if (option != sessionConfig.region) onRegionSelected(option)
+                            }
+                        )
+                    }
                 }
             }
-        }
 
-        // Date chip — opens Material3 DatePickerDialog
-        var showDatePicker by remember { mutableStateOf(false) }
-        val dateSdf = remember { SimpleDateFormat("yyMMdd", Locale.getDefault()) }
-        val displaySdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+            var showDatePicker by remember { mutableStateOf(false) }
+            val dateSdf = remember { SimpleDateFormat("yyMMdd", Locale.getDefault()) }
+            val displaySdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
 
-        Box {
-            val parsedDate = remember(sessionConfig.date) {
-                try { dateSdf.parse(sessionConfig.date) } catch (_: Exception) { null }
-            }
+            Box {
+                val parsedDate = remember(sessionConfig.date) {
+                    try { dateSdf.parse(sessionConfig.date) } catch (_: Exception) { null }
+                }
 
-            AssistChip(
-                onClick = { showDatePicker = true },
-                label = {
-                    Text(
-                        if (parsedDate != null) displaySdf.format(parsedDate) else sessionConfig.date,
-                        fontSize = 14.sp
-                    )
-                },
-                leadingIcon = { Text("日期", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(36.dp)
-            )
-        }
-
-        if (showDatePicker) {
-            val cal = Calendar.getInstance()
-            val parsed = try { dateSdf.parse(sessionConfig.date) } catch (_: Exception) { null }
-            if (parsed != null) cal.time = parsed
-            // Set to noon to avoid UTC date boundary shift when DatePicker converts to UTC
-            cal.set(Calendar.HOUR_OF_DAY, 12)
-            cal.set(Calendar.MINUTE, 0)
-            cal.set(Calendar.SECOND, 0)
-            cal.set(Calendar.MILLISECOND, 0)
-            val datePickerState = rememberDatePickerState(
-                initialSelectedDateMillis = cal.timeInMillis
-            )
-            DatePickerDialog(
-                onDismissRequest = { showDatePicker = false },
-                confirmButton = {
-                    TextButton(onClick = {
-                        datePickerState.selectedDateMillis?.let { millis ->
-                            val cal2 = Calendar.getInstance().apply { timeInMillis = millis }
-                            val newDate = dateSdf.format(cal2.time)
-                            if (newDate != sessionConfig.date) onDateSelected(newDate)
-                        }
-                        showDatePicker = false
-                    }) { Text("确定") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDatePicker = false }) { Text("取消") }
-                },
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                DatePicker(
-                    state = datePickerState,
-                    colors = DatePickerDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        headlineContentColor = MaterialTheme.colorScheme.onSurface,
-                        weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        subheadContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        selectedDayContainerColor = MaterialTheme.colorScheme.primary,
-                        selectedDayContentColor = MaterialTheme.colorScheme.onPrimary,
-                        todayContentColor = MaterialTheme.colorScheme.primary,
-                        todayDateBorderColor = MaterialTheme.colorScheme.primary,
-                        dayContentColor = MaterialTheme.colorScheme.onSurface,
-                        yearContentColor = MaterialTheme.colorScheme.onSurface,
-                        selectedYearContentColor = MaterialTheme.colorScheme.onPrimary
-                    )
+                AssistChip(
+                    onClick = { showDatePicker = true },
+                    label = {
+                        Text(
+                            if (parsedDate != null) displaySdf.format(parsedDate) else sessionConfig.date,
+                            fontSize = 14.sp
+                        )
+                    },
+                    leadingIcon = { Text("日期", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.height(36.dp)
                 )
             }
-        }
 
-        Box {
-            AssistChip(
-                onClick = { operatorExpanded = true },
-                label = {
-                    Text(
-                        if (sessionConfig.operator.isNotEmpty()) sessionConfig.operator else "请选择",
-                        fontSize = 14.sp,
-                        maxLines = 1
+            if (showDatePicker) {
+                val cal = Calendar.getInstance()
+                val parsed = try { dateSdf.parse(sessionConfig.date) } catch (_: Exception) { null }
+                if (parsed != null) cal.time = parsed
+                cal.set(Calendar.HOUR_OF_DAY, 12)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val datePickerState = rememberDatePickerState(
+                    initialSelectedDateMillis = cal.timeInMillis
+                )
+                DatePickerDialog(
+                    onDismissRequest = { showDatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            datePickerState.selectedDateMillis?.let { millis ->
+                                val cal2 = Calendar.getInstance().apply { timeInMillis = millis }
+                                val newDate = dateSdf.format(cal2.time)
+                                if (newDate != sessionConfig.date) onDateSelected(newDate)
+                            }
+                            showDatePicker = false
+                        }) { Text("确定") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+                    },
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    DatePicker(
+                        state = datePickerState,
+                        colors = DatePickerDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            headlineContentColor = MaterialTheme.colorScheme.onSurface,
+                            weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            subheadContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            selectedDayContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedDayContentColor = MaterialTheme.colorScheme.onPrimary,
+                            todayContentColor = MaterialTheme.colorScheme.primary,
+                            todayDateBorderColor = MaterialTheme.colorScheme.primary,
+                            dayContentColor = MaterialTheme.colorScheme.onSurface,
+                            yearContentColor = MaterialTheme.colorScheme.onSurface,
+                            selectedYearContentColor = MaterialTheme.colorScheme.onPrimary
+                        )
                     )
-                },
-                leadingIcon = { Text("拍摄人", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(36.dp)
-            )
-            DropdownMenu(
-                expanded = operatorExpanded,
-                onDismissRequest = { operatorExpanded = false },
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                operatorOptions.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option) },
-                        onClick = {
-                            operatorExpanded = false
-                            if (option != sessionConfig.operator) onOperatorSelected(option)
-                        }
-                    )
+                }
+            }
+
+            Box {
+                AssistChip(
+                    onClick = { operatorExpanded = true },
+                    label = {
+                        Text(
+                            if (sessionConfig.operator.isNotEmpty()) sessionConfig.operator else "请选择",
+                            fontSize = 14.sp,
+                            maxLines = 1
+                        )
+                    },
+                    leadingIcon = { Text("拍摄人", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.height(36.dp)
+                )
+                DropdownMenu(
+                    expanded = operatorExpanded,
+                    onDismissRequest = { operatorExpanded = false },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    operatorOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                operatorExpanded = false
+                                if (option != sessionConfig.operator) onOperatorSelected(option)
+                            }
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
-
-        Text(
-            text = locationText,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(0.6f, fill = false)
-        )
-
-        IconButton(
-            onClick = onRefreshLocation,
-            modifier = Modifier.size(34.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.LocationOn,
-                contentDescription = "获取定位",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            Text(
+                text = locationText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
             )
+
+            IconButton(
+                onClick = onRefreshLocation,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.LocationOn,
+                    contentDescription = "获取定位",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -1157,7 +1168,9 @@ fun CompactCodeAngleBar(
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
