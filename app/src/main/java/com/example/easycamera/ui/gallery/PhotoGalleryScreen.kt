@@ -91,7 +91,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun PhotoGalleryScreen(
     viewModel: PhotoGalleryViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToAnalysis: (region: String, date: String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val exportState by viewModel.exportState.collectAsState()
@@ -410,6 +411,24 @@ fun PhotoGalleryScreen(
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
+
+                    val selectedProject = uiState.selectedProject
+                    if (selectedProject != null) {
+                        OutlinedButton(
+                            onClick = {
+                                onNavigateToAnalysis(selectedProject.region, selectedProject.date)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "分析当前项目",
+                                fontSize = 16.sp,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
 
                     OutlinedButton(
                         onClick = { viewModel.startExport() },

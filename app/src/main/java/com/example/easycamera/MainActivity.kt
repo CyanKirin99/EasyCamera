@@ -1,9 +1,14 @@
 package com.example.easycamera
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.widget.Toast
 import android.view.KeyEvent
 import android.view.View
@@ -39,10 +44,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Collections
@@ -109,6 +117,7 @@ import com.example.easycamera.data.model.CaptureState
 import com.example.easycamera.data.repository.MetadataRepository
 import com.example.easycamera.domain.CaptureCodeManager
 import com.example.easycamera.ui.CaptureViewModel
+import com.example.easycamera.ui.analysis.AnalysisScreen
 import com.example.easycamera.ui.gallery.PhotoGalleryScreen
 import com.example.easycamera.ui.gallery.PhotoGalleryViewModel
 import com.example.easycamera.ui.theme.EasyCameraTheme
@@ -125,6 +134,10 @@ class MainActivity : ComponentActivity() {
     var onVolumeKeyCapture: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        com.amap.api.location.AMapLocationClient.updatePrivacyShow(this, true, true)
+        com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this, true)
+        com.amap.api.maps.MapsInitializer.updatePrivacyShow(this, true, true)
+        com.amap.api.maps.MapsInitializer.updatePrivacyAgree(this, true)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
@@ -230,6 +243,10 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
 
     var showPhotoGallery by remember { mutableStateOf(false) }
 
+    var showAnalysis by remember { mutableStateOf(false) }
+    var analysisRegion by remember { mutableStateOf("") }
+    var analysisDate by remember { mutableStateOf("") }
+
     val coroutineScope = rememberCoroutineScope()
 
     var dontShowNAWarning by remember { mutableStateOf(false) }
@@ -277,7 +294,12 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
             }
             PhotoGalleryScreen(
                 viewModel = galleryViewModel,
-                onNavigateBack = { showPhotoGallery = false }
+                onNavigateBack = { showPhotoGallery = false },
+                onNavigateToAnalysis = { region, date ->
+                    analysisRegion = region
+                    analysisDate = date
+                    showAnalysis = true
+                }
             )
         } else {
         BackHandler { showExitConfirm = true }
@@ -302,6 +324,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                             context = context,
                             outputFile = file,
                             onSuccess = {
+                                vibrate(context)
                                 val previewFile = File(context.cacheDir, "preview_${file.name}")
                                 try {
                                     file.copyTo(previewFile, overwrite = true)
@@ -382,6 +405,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
             modifier = modifier
                 .fillMaxSize()
                 .padding(horizontal = 12.dp)
+                .imePadding()
         ) {
             CompactInfoBar(
                 sessionConfig = sessionConfig,
@@ -407,240 +431,12 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            if (captureState.isGroupComplete) {
-                CompactGroupConfirmContent(
-                    captureState = captureState,
-                    capturedMetadataList = capturedMetadataList,
-                    onRetake = {
-                        capturedFilePaths.forEach { path ->
-                            try { File(path).delete() } catch (_: Exception) { }
-                        }
-                        viewModel.retakeGroup()
-                        metadataRepository.deleteSampleGroup(
-                            region = sessionConfig.region,
-                            date = sessionConfig.date,
-                            fieldCode = CaptureCodeManager.formatCode(captureState.fieldCode),
-                            sampleCode = CaptureCodeManager.formatCode(captureState.sampleCode)
-                        )
-                        metadataWriteFailed = false
-                    },
-                    onConfirm = { viewModel.confirmGroup() }
-                )
-            } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.6f)
-                    .clipToBounds(),
-                contentAlignment = Alignment.Center
-            ) {
-                if (cameraPermissionGranted && showCamera) {
-                    CameraPreview(
-                        modifier = Modifier.fillMaxSize(),
-                        imageCaptureState = imageCaptureState
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (!cameraPermissionGranted) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "需要相机权限才能拍照",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(
-                                    onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text("授予相机权限")
-                                }
-                            }
-                        } else {
-                            Text(
-                                text = "相机已关闭",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-                if (capturedPreviewPath != null) {
-                    val previewPath = capturedPreviewPath!!
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable { showRetakeConfirmDialog = true }
-                    ) {
-                        val painter = rememberAsyncImagePainter(
-                            model = ImageRequest.Builder(context)
-                                .data(File(previewPath))
-                                .crossfade(true)
-                                .build()
-                        )
-                        Image(
-                            painter = painter,
-                            contentDescription = "已拍摄照片，点击重拍",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Transparent)
-                                .padding(4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Color.Transparent,
-                                        RoundedCornerShape(4.dp)
-                                    )
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .background(
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                                        RoundedCornerShape(bottomEnd = 8.dp, topStart = 4.dp)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text(
-                                        text = "✓ 已拍摄",
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = viewModel.currentAngleLabel,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(bottom = 8.dp)
-                                    .background(
-                                        Color.Black.copy(alpha = 0.6f),
-                                        RoundedCornerShape(6.dp)
-                                    )
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "点击重拍",
-                                    color = Color.White,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                ) {
-                    IconButton(
-                        onClick = { showCamera = !showCamera },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(
-                                Color.Black.copy(alpha = 0.5f),
-                                RoundedCornerShape(8.dp)
-                            )
-                    ) {
-                        Icon(
-                            imageVector = if (showCamera) Icons.Default.Videocam else Icons.Default.VideocamOff,
-                            contentDescription = if (showCamera) "关闭相机预览" else "打开相机预览",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            CompactCodeAngleBar(
-                captureState = captureState,
-                onSelectAngle = { viewModel.selectAngleIndex(it) },
-                onDecrementField = { viewModel.decrementFieldCode() },
-                onIncrementField = { viewModel.incrementFieldCode() },
-                onDecrementSample = { viewModel.decrementSampleCode() },
-                onIncrementSample = { viewModel.incrementSampleCode() },
-                progressLabel = viewModel.progressLabel
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Optional sample info fields: Bbch and Plant Height
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = sessionConfig.bbch,
-                    onValueChange = { viewModel.updateBbch(it) },
-                    label = { Text("bbch", fontSize = 11.sp) },
-                    placeholder = { Text("生育期", fontSize = 11.sp) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f).height(40.dp),
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(6.dp)
-                )
-                OutlinedTextField(
-                    value = sessionConfig.plantHeight,
-                    onValueChange = { viewModel.updatePlantHeight(it) },
-                    label = { Text("株高(cm)", fontSize = 11.sp) },
-                    placeholder = { Text("可选", fontSize = 11.sp) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f).height(40.dp),
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(6.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            if (captureState.isGroupComplete) {
-                // CompactGroupConfirmContent already has retake/confirm buttons
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val retakeInteractionSource = remember { MutableInteractionSource() }
-                    val isRetakePressed by retakeInteractionSource.collectIsPressedAsState()
-                    val retakeScale by animateFloatAsState(
-                        if (isRetakePressed) 0.95f else 1f,
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-                        label = "retakeScale"
-                    )
-
-                    OutlinedButton(
-                        onClick = {
-                            val oldPreviewPath = capturedPreviewPath
-                            capturedPreviewPath = null
-                            if (oldPreviewPath != null && oldPreviewPath.startsWith(context.cacheDir.absolutePath)) {
-                                try { File(oldPreviewPath).delete() } catch (_: Exception) { }
-                            }
+            Column(modifier = Modifier.weight(1f)) {
+                if (captureState.isGroupComplete) {
+                    CompactGroupConfirmContent(
+                        captureState = captureState,
+                        capturedMetadataList = capturedMetadataList,
+                        onRetake = {
                             capturedFilePaths.forEach { path ->
                                 try { File(path).delete() } catch (_: Exception) { }
                             }
@@ -653,37 +449,269 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                             )
                             metadataWriteFailed = false
                         },
+                        onConfirm = { viewModel.confirmGroup() }
+                    )
+                } else {
+                    Box(
                         modifier = Modifier
-                            .weight(0.35f)
-                            .graphicsLayer(scaleX = retakeScale, scaleY = retakeScale),
-                        shape = RoundedCornerShape(8.dp),
-                        interactionSource = retakeInteractionSource
+                            .fillMaxWidth()
+                            .weight(0.6f)
+                            .clipToBounds(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("重拍本组", fontSize = 14.sp, maxLines = 1)
+                        if (cameraPermissionGranted && showCamera) {
+                            CameraPreview(
+                                modifier = Modifier.fillMaxSize(),
+                                imageCaptureState = imageCaptureState
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!cameraPermissionGranted) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = "需要相机权限才能拍照",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Button(
+                                            onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("授予相机权限")
+                                        }
+                                    }
+                                } else {
+                                    Text(
+                                        text = "相机已关闭",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        if (capturedPreviewPath != null) {
+                            val previewPath = capturedPreviewPath!!
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clickable { showRetakeConfirmDialog = true }
+                            ) {
+                                val painter = rememberAsyncImagePainter(
+                                    model = ImageRequest.Builder(context)
+                                        .data(File(previewPath))
+                                        .crossfade(true)
+                                        .build()
+                                )
+                                Image(
+                                    painter = painter,
+                                    contentDescription = "已拍摄照片，点击重拍",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Transparent)
+                                        .padding(4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                Color.Transparent,
+                                                RoundedCornerShape(4.dp)
+                                            )
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .background(
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                                                RoundedCornerShape(bottomEnd = 8.dp, topStart = 4.dp)
+                                            )
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "✓ 已拍摄",
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = viewModel.currentAngleLabel,
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .padding(bottom = 8.dp)
+                                            .background(
+                                                Color.Black.copy(alpha = 0.6f),
+                                                RoundedCornerShape(6.dp)
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "点击重拍",
+                                            color = Color.White,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = { showCamera = !showCamera },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(
+                                        Color.Black.copy(alpha = 0.5f),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                            ) {
+                                Icon(
+                                    imageVector = if (showCamera) Icons.Default.Videocam else Icons.Default.VideocamOff,
+                                    contentDescription = if (showCamera) "关闭相机预览" else "打开相机预览",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
                     }
 
-                    val captureInteractionSource = remember { MutableInteractionSource() }
-                    val isCapturePressed by captureInteractionSource.collectIsPressedAsState()
-                    val captureScale by animateFloatAsState(
-                        if (isCapturePressed) 0.95f else 1f,
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-                        label = "captureScale"
-                    )
-
-                    Button(
-                        onClick = { performCapture() },
+                    Column(
                         modifier = Modifier
-                            .weight(0.65f)
-                            .graphicsLayer(scaleX = captureScale, scaleY = captureScale),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = !isCapturing,
-                        interactionSource = captureInteractionSource
+                            .fillMaxWidth()
+                            .weight(0.4f)
+                            .verticalScroll(rememberScrollState())
                     ) {
-                        Text(
-                            text = if (isCapturing) "拍照中..." else "拍照",
-                            fontSize = 18.sp,
-                            modifier = Modifier.padding(vertical = 6.dp)
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        CompactCodeAngleBar(
+                            captureState = captureState,
+                            onSelectAngle = { viewModel.selectAngleIndex(it) },
+                            onDecrementField = { viewModel.decrementFieldCode() },
+                            onIncrementField = { viewModel.incrementFieldCode() },
+                            onDecrementSample = { viewModel.decrementSampleCode() },
+                            onIncrementSample = { viewModel.incrementSampleCode() },
+                            progressLabel = viewModel.progressLabel
                         )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = sessionConfig.bbch,
+                                onValueChange = { viewModel.updateBbch(it) },
+                                label = { Text("bbch", fontSize = 11.sp) },
+                                placeholder = { Text("生育期", fontSize = 11.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                textStyle = MaterialTheme.typography.bodySmall,
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            OutlinedTextField(
+                                value = sessionConfig.plantHeight,
+                                onValueChange = { viewModel.updatePlantHeight(it) },
+                                label = { Text("株高(cm)", fontSize = 11.sp) },
+                                placeholder = { Text("可选", fontSize = 11.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                textStyle = MaterialTheme.typography.bodySmall,
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val retakeInteractionSource = remember { MutableInteractionSource() }
+                            val isRetakePressed by retakeInteractionSource.collectIsPressedAsState()
+                            val retakeScale by animateFloatAsState(
+                                if (isRetakePressed) 0.95f else 1f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                                label = "retakeScale"
+                            )
+
+                            OutlinedButton(
+                                onClick = {
+                                    val oldPreviewPath = capturedPreviewPath
+                                    capturedPreviewPath = null
+                                    if (oldPreviewPath != null && oldPreviewPath.startsWith(context.cacheDir.absolutePath)) {
+                                        try { File(oldPreviewPath).delete() } catch (_: Exception) { }
+                                    }
+                                    capturedFilePaths.forEach { path ->
+                                        try { File(path).delete() } catch (_: Exception) { }
+                                    }
+                                    viewModel.retakeGroup()
+                                    metadataRepository.deleteSampleGroup(
+                                        region = sessionConfig.region,
+                                        date = sessionConfig.date,
+                                        fieldCode = CaptureCodeManager.formatCode(captureState.fieldCode),
+                                        sampleCode = CaptureCodeManager.formatCode(captureState.sampleCode)
+                                    )
+                                    metadataWriteFailed = false
+                                },
+                                modifier = Modifier
+                                    .weight(0.35f)
+                                    .graphicsLayer(scaleX = retakeScale, scaleY = retakeScale),
+                                shape = RoundedCornerShape(8.dp),
+                                interactionSource = retakeInteractionSource
+                            ) {
+                                Text("重拍本组", fontSize = 14.sp, maxLines = 1)
+                            }
+
+                            val captureInteractionSource = remember { MutableInteractionSource() }
+                            val isCapturePressed by captureInteractionSource.collectIsPressedAsState()
+                            val captureScale by animateFloatAsState(
+                                if (isCapturePressed) 0.95f else 1f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                                label = "captureScale"
+                            )
+
+                            Button(
+                                onClick = { performCapture() },
+                                modifier = Modifier
+                                    .weight(0.65f)
+                                    .graphicsLayer(scaleX = captureScale, scaleY = captureScale),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = !isCapturing,
+                                interactionSource = captureInteractionSource
+                            ) {
+                                Text(
+                                    text = if (isCapturing) "拍照中..." else "拍照",
+                                    fontSize = 18.sp,
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -700,8 +728,25 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(4.dp))
         }
     }
+    if (showAnalysis) {
+        BackHandler { showAnalysis = false }
+        AnalysisScreen(
+            region = analysisRegion,
+            date = analysisDate,
+            onBack = { showAnalysis = false }
+        )
+    }
     if (showFieldEditDialog) {
-        FieldEditDialog(viewModel)
+        FieldEditDialog(
+            viewModel = viewModel,
+            onFieldChanged = {
+                coroutineScope.launch {
+                    viewModel.setLocationStatus("定位中...")
+                    val loc = locationProvider.getLocation()
+                    viewModel.updateLocation(loc)
+                }
+            }
+        )
     }
 
     if (showSampleEditDialog) {
@@ -1017,7 +1062,7 @@ fun CompactInfoBar(
             val dateSdf = remember { SimpleDateFormat("yyMMdd", Locale.getDefault()) }
             val displaySdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
 
-            Box(modifier = Modifier.weight(1f)) {
+            Box(modifier = Modifier.weight(1.3f)) {
                 val parsedDate = remember(sessionConfig.date) {
                     try { dateSdf.parse(sessionConfig.date) } catch (_: Exception) { null }
                 }
@@ -1084,7 +1129,7 @@ fun CompactInfoBar(
                 }
             }
 
-            Box(modifier = Modifier.weight(1f)) {
+            Box(modifier = Modifier.weight(0.7f)) {
                 AssistChip(
                     onClick = { operatorExpanded = true },
                     label = {
@@ -1506,7 +1551,7 @@ fun CompactBottomBar(
 }
 
 @Composable
-fun FieldEditDialog(viewModel: CaptureViewModel) {
+fun FieldEditDialog(viewModel: CaptureViewModel, onFieldChanged: () -> Unit = {}) {
     val editText by viewModel.fieldEditText.collectAsState()
     val editError by viewModel.fieldEditError.collectAsState()
     val captureState by viewModel.captureState.collectAsState()
@@ -1578,7 +1623,13 @@ fun FieldEditDialog(viewModel: CaptureViewModel) {
             }
         },
         confirmButton = {
-            Button(onClick = { viewModel.confirmFieldEdit() }, shape = RoundedCornerShape(8.dp)) {
+            Button(
+                onClick = {
+                    viewModel.confirmFieldEdit()
+                    onFieldChanged()
+                },
+                shape = RoundedCornerShape(8.dp)
+            ) {
                 Text("确认")
             }
         },
@@ -1646,4 +1697,26 @@ fun CodeLockDialog(
             }
         }
     )
+}
+
+private fun vibrate(context: android.content.Context) {
+    try {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+            vm?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+        if (vibrator != null && vibrator.hasVibrator()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(60, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(60)
+            }
+        }
+    } catch (_: Exception) {
+        // 震动失败不影响正常拍照
+    }
 }
