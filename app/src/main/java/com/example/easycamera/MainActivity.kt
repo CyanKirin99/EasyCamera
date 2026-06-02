@@ -21,6 +21,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.ImageCapture
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
@@ -40,9 +42,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -68,6 +72,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -271,6 +276,8 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
 
     var showExitConfirm by remember { mutableStateOf(false) }
 
+    var showMissingFieldsPrompt by remember { mutableStateOf(false) }
+
     AnimatedContent(
         targetState = showPhotoGallery,
         transitionSpec = {
@@ -307,10 +314,8 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
         val performCapture = {
             val ic = imageCaptureState.value
             if (ic != null && !captureState.isGroupComplete && !isCapturing) {
-                if (sessionConfig.region.isBlank()) {
-                    viewModel.setCaptureMessage("请先选择地区")
-                } else if (sessionConfig.operator.isBlank()) {
-                    viewModel.setCaptureMessage("请先选择拍摄人")
+                if (sessionConfig.region.isBlank() || sessionConfig.operator.isBlank()) {
+                    showMissingFieldsPrompt = true
                 } else {
                     val doCapture: () -> Unit = {
                     if (viewModel.tryStartCapture()) {
@@ -757,6 +762,15 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
         CodeLockDialog(
             message = codeLockMessage!!,
             onDismiss = { viewModel.clearCaptureMessage() }
+        )
+    }
+
+    if (showMissingFieldsPrompt) {
+        MissingFieldsDialog(
+            sessionConfig = sessionConfig,
+            onUpdateRegion = { viewModel.updateRegion(it) },
+            onUpdateOperator = { viewModel.updateOperator(it) },
+            onDismiss = { showMissingFieldsPrompt = false }
         )
     }
 
@@ -1307,6 +1321,10 @@ fun CompactCodeAngleBar(
                         containerColor = bgColor,
                         contentColor = textColor
                     ),
+                    border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = if (isSelected) 6.dp else 0.dp
+                    ),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                     interactionSource = angleInteractionSource
                 ) {
@@ -1676,6 +1694,98 @@ fun SampleEditDialog(viewModel: CaptureViewModel) {
         dismissButton = {
             TextButton(onClick = { viewModel.closeSampleEditDialog() }) {
                 Text("取消")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun MissingFieldsDialog(
+    sessionConfig: CaptureSessionConfig,
+    onUpdateRegion: (String) -> Unit,
+    onUpdateOperator: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val regionOptions = listOf("JL", "XT", "JS")
+    val operatorOptions = listOf("黄添", "史俊尧", "苏辰晔", "王宇杰", "张浩然")
+
+    val missingRegion = sessionConfig.region.isBlank()
+    val missingOperator = sessionConfig.operator.isBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(12.dp),
+        title = { Text("请补充以下信息") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "拍摄前需要填写以下内容：",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (missingRegion) {
+                    Column {
+                        Text(
+                            text = "选择地区",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            regionOptions.forEach { option ->
+                                FilterChip(
+                                    selected = false,
+                                    onClick = {
+                                        onUpdateRegion(option)
+                                        if (!missingOperator || sessionConfig.operator.isNotEmpty()) {
+                                            onDismiss()
+                                        }
+                                    },
+                                    label = { Text(option, fontSize = 13.sp) },
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                if (missingOperator) {
+                    Column {
+                        Text(
+                            text = "选择拍摄人",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            operatorOptions.forEach { option ->
+                                FilterChip(
+                                    selected = false,
+                                    onClick = {
+                                        onUpdateOperator(option)
+                                        if (!missingRegion || sessionConfig.region.isNotEmpty()) {
+                                            onDismiss()
+                                        }
+                                    },
+                                    label = { Text(option, fontSize = 13.sp) },
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("知道了")
             }
         }
     )
