@@ -32,10 +32,12 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -58,6 +60,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,6 +83,9 @@ import coil.request.ImageRequest
 import com.example.easycamera.data.model.CaptureProject
 import com.example.easycamera.data.model.CapturedPhoto
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,7 +137,17 @@ fun PhotoGalleryScreen(
         }
     }
 
+    val importMessage by viewModel.importMessage.collectAsState()
+    LaunchedEffect(importMessage) {
+        if (importMessage != null) {
+            Toast.makeText(context, importMessage, Toast.LENGTH_LONG).show()
+            viewModel.clearImportMessage()
+        }
+    }
+
     var showDeleteProjectConfirm by remember { mutableStateOf(false) }
+
+    var showProjectContent by remember { mutableStateOf(true) }
 
     var showFieldEditDialog by remember { mutableStateOf(false) }
     var editingFieldCode by remember { mutableStateOf("") }
@@ -140,6 +156,51 @@ fun PhotoGalleryScreen(
     var fieldEditError by remember { mutableStateOf<String?>(null) }
     var showOverwriteFieldConfirm by remember { mutableStateOf(false) }
     var pendingNewFieldCode by remember { mutableStateOf("") }
+    var showSwapConfirmDialog by remember { mutableStateOf(false) }
+    var showForceOverwriteConfirmDialog by remember { mutableStateOf(false) }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    var showImportDialog by remember { mutableStateOf(false) }
+    var pendingImportPlan by remember { mutableStateOf<com.example.easycamera.data.imports.ImportPlan?>(null) }
+    var pendingImportTempFile by remember { mutableStateOf<File?>(null) }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch(Dispatchers.IO) {
+                val tempFile = File(context.cacheDir, "import_temp_${System.currentTimeMillis()}.zip")
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        tempFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    val result = com.example.easycamera.data.imports.ProjectImportManager.analyze(context, tempFile)
+                    withContext(Dispatchers.Main) {
+                        when (result) {
+                            is com.example.easycamera.data.imports.ImportResult.Ready -> {
+                                if (result.plan.hasConflicts) {
+                                    pendingImportPlan = result.plan
+                                    pendingImportTempFile = tempFile
+                                    showImportDialog = true
+                                } else {
+                                    viewModel.executeImport(result.plan, overwriteExisting = false, tempFile = tempFile)
+                                }
+                            }
+                            is com.example.easycamera.data.imports.ImportResult.Error -> {
+                                viewModel.showToast(result.message)
+                                tempFile.delete()
+                            }
+                            else -> {}
+                        }
+                    }
+                } catch (e: Exception) {
+                    viewModel.showToast("读取文件失败：${e.message ?: "未知错误"}")
+                    tempFile.delete()
+                }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -153,9 +214,6 @@ fun PhotoGalleryScreen(
                 actions = {
                     IconButton(onClick = { viewModel.refreshCurrentProject() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
-                    }
-                    IconButton(onClick = { showDeleteProjectConfirm = true }) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除项目")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -182,7 +240,7 @@ fun PhotoGalleryScreen(
                 }
             } else if (uiState.projects.isEmpty()) {
                 Box(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -192,17 +250,113 @@ fun PhotoGalleryScreen(
                     )
                 }
             } else {
+                // Filter row (placed above candidate projects)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    var filterRegionExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        AssistChip(
+                            onClick = { filterRegionExpanded = true },
+                            label = {
+                                Text(
+                                    if (uiState.filterRegion.isNotEmpty()) uiState.filterRegion else "全部地区",
+                                    fontSize = 13.sp
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp)
+                        )
+                        DropdownMenu(
+                            expanded = filterRegionExpanded,
+                            onDismissRequest = { filterRegionExpanded = false },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("全部地区") },
+                                onClick = {
+                                    filterRegionExpanded = false
+                                    viewModel.setFilterRegion("")
+                                }
+                            )
+                            uiState.allRegions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option) },
+                                    onClick = {
+                                        filterRegionExpanded = false
+                                        viewModel.setFilterRegion(option)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    var filterDateExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        AssistChip(
+                            onClick = { filterDateExpanded = true },
+                            label = {
+                                Text(
+                                    if (uiState.filterDate.isNotEmpty()) uiState.filterDate else "全部日期",
+                                    fontSize = 13.sp
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp)
+                        )
+                        DropdownMenu(
+                            expanded = filterDateExpanded,
+                            onDismissRequest = { filterDateExpanded = false },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("全部日期") },
+                                onClick = {
+                                    filterDateExpanded = false
+                                    viewModel.setFilterDate("")
+                                }
+                            )
+                            uiState.allDates.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option) },
+                                    onClick = {
+                                        filterDateExpanded = false
+                                        viewModel.setFilterDate(option)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    if (uiState.filterRegion.isNotEmpty() || uiState.filterDate.isNotEmpty()) {
+                        TextButton(
+                            onClick = {
+                                viewModel.setFilterRegion("")
+                                viewModel.setFilterDate("")
+                            },
+                            modifier = Modifier.height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Text("清除", fontSize = 11.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 ProjectSelectorBar(
                     candidateProjects = uiState.candidateProjects,
                     selectedProject = uiState.selectedProject,
                     onProjectSelected = { viewModel.selectProject(it) },
-                    onRefresh = { viewModel.refreshCurrentProject() }
+                    onRefresh = { viewModel.refreshCurrentProject() },
+                    onDeleteProject = { showDeleteProjectConfirm = true },
+                    onToggleCollapse = { showProjectContent = !showProjectContent }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 val selectedProject = uiState.selectedProject
-                if (selectedProject != null) {
+                if (selectedProject != null && showProjectContent) {
                     Text(
                         text = "当前项目：${selectedProject.projectName}",
                         style = MaterialTheme.typography.titleSmall,
@@ -275,9 +429,23 @@ fun PhotoGalleryScreen(
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { importLauncher.launch(arrayOf("application/zip")) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = "导入项目",
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 
@@ -297,6 +465,61 @@ fun PhotoGalleryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteProjectConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showImportDialog && pendingImportPlan != null) {
+        val plan = pendingImportPlan!!
+        var overwrite by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = {
+                showImportDialog = false
+                pendingImportPlan = null
+                pendingImportTempFile?.delete()
+                pendingImportTempFile = null
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("导入检测到冲突") },
+            text = {
+                Column {
+                    Text(
+                        text = "压缩包中包含 ${plan.entries.size} 张照片，其中 ${plan.entries.count { it.exists }} 张已存在于本地。",
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { overwrite = !overwrite }
+                    ) {
+                        Checkbox(
+                            checked = overwrite,
+                            onCheckedChange = { overwrite = !overwrite }
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("覆盖已存在的文件")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showImportDialog = false
+                    val p = plan
+                    val tf = pendingImportTempFile
+                    pendingImportPlan = null
+                    pendingImportTempFile = null
+                    viewModel.executeImport(p, overwriteExisting = overwrite, tempFile = tf)
+                }) {
+                    Text("开始导入")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImportDialog = false
+                    pendingImportPlan = null
+                }) {
                     Text("取消")
                 }
             }
@@ -428,9 +651,9 @@ fun PhotoGalleryScreen(
             text = {
                 Text(
                     "目标田块 ${pendingNewFieldCode} 已存在照片。\n\n" +
-                            "请选择操作方式：\n" +
-                            "• 覆盖：删除目标田块所有照片，将当前田块照片移入\n" +
-                            "• 对调：将两个田块的所有照片编号互换"
+                            "请选择操作方式：\n\n" +
+                            "• 对调：将田块 ${editingFieldCode.padStart(2, '0')} 与田块 ${pendingNewFieldCode} 的所有照片编号互换\n" +
+                            "• 覆盖：田块 ${pendingNewFieldCode} 的所有照片将被完全删除且不可恢复，当前田块 ${editingFieldCode.padStart(2, '0')} 的照片将移入"
                 )
             },
             confirmButton = {
@@ -441,12 +664,7 @@ fun PhotoGalleryScreen(
                     Button(
                         onClick = {
                             showOverwriteFieldConfirm = false
-                            val newCode = pendingNewFieldCode
-                            pendingNewFieldCode = ""
-                            viewModel.swapFieldCode(
-                                oldFieldCode = editingFieldCode,
-                                newFieldCode = newCode
-                            )
+                            showSwapConfirmDialog = true
                         },
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.weight(1f)
@@ -456,14 +674,7 @@ fun PhotoGalleryScreen(
                     Button(
                         onClick = {
                             showOverwriteFieldConfirm = false
-                            val newCode = pendingNewFieldCode
-                            pendingNewFieldCode = ""
-                            viewModel.modifyFieldCode(
-                                oldFieldCode = editingFieldCode,
-                                sampleCode = editingSampleCode,
-                                newFieldCode = newCode,
-                                overwriteDestination = true
-                            )
+                            showForceOverwriteConfirmDialog = true
                         },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -485,6 +696,80 @@ fun PhotoGalleryScreen(
             }
         )
     }
+
+    if (showSwapConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showSwapConfirmDialog = false
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("确认对调") },
+            text = {
+                Text(
+                    "此操作将田块 ${editingFieldCode.padStart(2, '0')} 与田块 ${pendingNewFieldCode} 的所有照片编号互换，是否确认？",
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSwapConfirmDialog = false
+                    val newCode = pendingNewFieldCode
+                    pendingNewFieldCode = ""
+                    viewModel.swapFieldCode(
+                        oldFieldCode = editingFieldCode,
+                        newFieldCode = newCode
+                    )
+                }) {
+                    Text("确认对调")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showSwapConfirmDialog = false
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showForceOverwriteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showForceOverwriteConfirmDialog = false
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("确认覆盖") },
+            text = {
+                Text(
+                    "此操作将彻底删除田块 ${pendingNewFieldCode} 的所有照片且不可恢复，当前田块 ${editingFieldCode.padStart(2, '0')} 的照片将移入，是否确认？",
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showForceOverwriteConfirmDialog = false
+                    val newCode = pendingNewFieldCode
+                    pendingNewFieldCode = ""
+                    viewModel.modifyFieldCode(
+                        oldFieldCode = editingFieldCode,
+                        sampleCode = editingSampleCode,
+                        newFieldCode = newCode,
+                        overwriteDestination = true
+                    )
+                }) {
+                    Text("确认覆盖", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showForceOverwriteConfirmDialog = false
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -493,9 +778,10 @@ fun ProjectSelectorBar(
     candidateProjects: List<CaptureProject>,
     selectedProject: CaptureProject?,
     onProjectSelected: (CaptureProject) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onDeleteProject: () -> Unit,
+    onToggleCollapse: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
     var showNoOtherTip by remember { mutableStateOf(false) }
 
     Spacer(modifier = Modifier.height(8.dp))
@@ -506,13 +792,7 @@ fun ProjectSelectorBar(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Button(
-            onClick = {
-                if (candidateProjects.isEmpty()) {
-                    showNoOtherTip = true
-                } else {
-                    expanded = true
-                }
-            },
+            onClick = onToggleCollapse,
             shape = RoundedCornerShape(8.dp)
         ) {
             Text(
@@ -522,24 +802,16 @@ fun ProjectSelectorBar(
             )
         }
 
-        Box {
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
+        if (selectedProject != null) {
+            IconButton(
+                onClick = onDeleteProject,
+                modifier = Modifier.size(32.dp)
             ) {
-                candidateProjects.forEach { project ->
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = "${project.projectName}（${project.photoCount}张）"
-                            )
-                        },
-                        onClick = {
-                            onProjectSelected(project)
-                            expanded = false
-                        }
-                    )
-                }
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "删除项目",
+                    tint = MaterialTheme.colorScheme.error
+                )
             }
         }
 
@@ -553,7 +825,7 @@ fun ProjectSelectorBar(
                     FilterChip(
                         selected = false,
                         onClick = { onProjectSelected(project) },
-                        label = { Text(project.projectName, fontSize = 11.sp) }
+                        label = { Text(project.projectName, fontSize = 12.sp) }
                     )
                 }
             }
@@ -569,7 +841,7 @@ fun ProjectSelectorBar(
         }
     }
 
-    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 }
 
 data class SampleDisplay(

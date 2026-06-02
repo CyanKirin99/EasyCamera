@@ -13,5 +13,8 @@ data class CaptureMetadata(
     val filename: String,
     val relativePath: String,
     val filePath: String = "",
-    val retakeGroupId: String = ""
+    val retakeGroupId: String = "",
+    val bbch: String = "",
+    val plantHeight: String = "",
+    val extraFields: Map<String, String> = emptyMap()
 )

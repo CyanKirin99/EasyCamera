@@ -2,6 +2,7 @@ package com.example.easycamera.data.repository
 
 import android.content.Context
 import com.example.easycamera.data.file.CsvUtils
+import com.example.easycamera.data.file.FileNameParser
 import com.example.easycamera.data.model.CaptureMetadata
 import java.io.File
 
@@ -20,7 +21,10 @@ class MetadataRepository(private val context: Context) {
             "capture_time",
             "filename",
             "relative_path",
-            "file_path"
+            "file_path",
+            "bbch",
+            "plant_height",
+            "extra_fields"
         )
     }
 
@@ -100,7 +104,11 @@ class MetadataRepository(private val context: Context) {
                 metadata.captureTime,
                 metadata.filename,
                 metadata.relativePath,
-                metadata.filePath
+                metadata.filePath,
+                metadata.bbch,
+                metadata.plantHeight,
+                if (metadata.extraFields.isEmpty()) "" else
+                    metadata.extraFields.entries.joinToString(";") { "${it.key}=${it.value}" }
             )
             CsvUtils.appendLine(file, values)
         } catch (e: Exception) {
@@ -194,7 +202,10 @@ class MetadataRepository(private val context: Context) {
                         captureTime = row.getOrElse(8) { "" },
                         filename = row.getOrElse(9) { "" },
                         relativePath = row.getOrElse(10) { "" },
-                        filePath = row.getOrElse(11) { "" }
+                        filePath = row.getOrElse(11) { "" },
+                        bbch = row.getOrElse(12) { "" },
+                        plantHeight = row.getOrElse(13) { "" },
+                        extraFields = parseExtraFields(row.getOrElse(14) { "" })
                     )
                 }
             }
@@ -202,6 +213,97 @@ class MetadataRepository(private val context: Context) {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * Finds ALL metadata records for a given (region, date, fieldCode, sampleCode) across all angles.
+     * Returns a list of matching CaptureMetadata. Empty list if no matches.
+     */
+    fun findSampleGroupRecords(
+        region: String,
+        date: String,
+        fieldCode: String,
+        sampleCode: String
+    ): List<CaptureMetadata> {
+        val result = mutableListOf<CaptureMetadata>()
+        try {
+            val file = getMetadataFile(region, date)
+            if (file.exists()) {
+                val allLines = CsvUtils.readAllLines(file)
+                if (allLines.size >= 2) {
+                    for (row in allLines.drop(1)) {
+                        if (row.size >= 12 &&
+                            row[0] == region &&
+                            row[1] == date &&
+                            row[2] == fieldCode &&
+                            row[3] == sampleCode
+                        ) {
+                            result.add(
+                                CaptureMetadata(
+                                    region = row[0],
+                                    date = row[1],
+                                    fieldCode = row[2],
+                                    sampleCode = row[3],
+                                    angleCode = row[4],
+                                    longitude = row.getOrElse(5) { "" },
+                                    latitude = row.getOrElse(6) { "" },
+                                    operator = row.getOrElse(7) { "" },
+                                    captureTime = row.getOrElse(8) { "" },
+                                    filename = row.getOrElse(9) { "" },
+                                    relativePath = row.getOrElse(10) { "" },
+                                    filePath = row.getOrElse(11) { "" },
+                                    bbch = row.getOrElse(12) { "" },
+                                    plantHeight = row.getOrElse(13) { "" },
+                                    extraFields = parseExtraFields(row.getOrElse(14) { "" })
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+
+        if (result.isNotEmpty()) return result
+
+        // Fallback: scan filesystem for matching files when CSV is missing or incomplete.
+        // This handles cases where files exist on disk but CSV metadata wasn't written
+        // (e.g., imported projects where CSV may not be present).
+        try {
+            val imagesDir = File(
+                context.getExternalFilesDir(null),
+                "EasyCamera/${region}_${date}/images"
+            )
+            if (imagesDir.exists()) {
+                val prefix = "${region}_${date}_${fieldCode}_${sampleCode}_"
+                imagesDir.listFiles()?.forEach { file ->
+                    if ((file.name.endsWith(".jpg", ignoreCase = true) || file.name.endsWith(".jpeg", ignoreCase = true)) &&
+                        file.name.startsWith(prefix)
+                    ) {
+                        val parsed = FileNameParser.parse(file.name)
+                        if (parsed != null) {
+                            result.add(
+                                CaptureMetadata(
+                                    region = parsed.region,
+                                    date = parsed.date,
+                                    fieldCode = parsed.fieldCode,
+                                    sampleCode = parsed.sampleCode,
+                                    angleCode = parsed.angleCode,
+                                    longitude = parsed.longitude,
+                                    latitude = parsed.latitude,
+                                    operator = "",
+                                    captureTime = "",
+                                    filename = file.name,
+                                    relativePath = "EasyCamera/${region}_${date}/images/${file.name}",
+                                    filePath = file.absolutePath
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+
+        return result
     }
 
     /**
@@ -259,5 +361,17 @@ class MetadataRepository(private val context: Context) {
             if (!CsvUtils.appendLine(file, row)) return false
         }
         return true
+    }
+
+    private fun parseExtraFields(value: String): Map<String, String> {
+        if (value.isBlank()) return emptyMap()
+        return try {
+            value.split(";").mapNotNull { pair ->
+                val eqIdx = pair.indexOf('=')
+                if (eqIdx > 0 && eqIdx < pair.length - 1) {
+                    pair.substring(0, eqIdx) to pair.substring(eqIdx + 1)
+                } else null
+            }.toMap()
+        } catch (_: Exception) { emptyMap() }
     }
 }

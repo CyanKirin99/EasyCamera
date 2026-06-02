@@ -162,6 +162,14 @@ class CaptureViewModel : ViewModel() {
         resetCodesAndState()
     }
 
+    fun updateBbch(bbch: String) {
+        _sessionConfig.update { it.copy(bbch = bbch) }
+    }
+
+    fun updatePlantHeight(height: String) {
+        _sessionConfig.update { it.copy(plantHeight = height) }
+    }
+
     private fun resetCodesAndState() {
         _captureState.value = CaptureState()
         _capturedMetadataList.value = emptyList()
@@ -373,7 +381,10 @@ class CaptureViewModel : ViewModel() {
             filename = filePath.substringAfterLast(File.separatorChar),
             relativePath = "EasyCamera/${config.region}_${config.date}/images/${filePath.substringAfterLast(File.separatorChar)}",
             filePath = filePath,
-            retakeGroupId = ""
+            retakeGroupId = "",
+            bbch = config.bbch,
+            plantHeight = config.plantHeight,
+            extraFields = config.extraFields
         )
 
         _capturedMetadataList.update { list -> list + metadata }

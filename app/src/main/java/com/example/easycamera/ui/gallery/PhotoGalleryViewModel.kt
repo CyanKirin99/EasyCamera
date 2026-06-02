@@ -6,6 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.easycamera.data.export.ExportResult
 import com.example.easycamera.data.export.ProjectExportManager
+import com.example.easycamera.data.imports.ImportPlan
+import com.example.easycamera.data.imports.ImportResult
+import com.example.easycamera.data.imports.ProjectImportManager
 import com.example.easycamera.data.model.CaptureProject
 import com.example.easycamera.data.model.CapturedPhoto
 import com.example.easycamera.data.repository.MetadataRepository
@@ -15,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -24,7 +28,11 @@ data class GalleryUiState(
     val candidateProjects: List<CaptureProject> = emptyList(),
     val photos: List<CapturedPhoto> = emptyList(),
     val isLoading: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val filterRegion: String = "",
+    val filterDate: String = "",
+    val allRegions: List<String> = emptyList(),
+    val allDates: List<String> = emptyList()
 )
 
 sealed class ExportState {
@@ -49,6 +57,9 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
     private val _deleteMessage = MutableStateFlow<String?>(null)
     val deleteMessage: StateFlow<String?> = _deleteMessage.asStateFlow()
 
+    private val _importMessage = MutableStateFlow<String?>(null)
+    val importMessage: StateFlow<String?> = _importMessage.asStateFlow()
+
     private var currentProjectName: String? = null
 
     fun setCurrentProjectName(name: String) {
@@ -70,9 +81,13 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
             val allProjects = withContext(Dispatchers.IO) {
                 repository.scanProjects()
             }
+            val allRegions = allProjects.map { it.region }.distinct().sorted()
+            val allDates = allProjects.map { it.date }.distinct().sortedDescending()
             _uiState.value = _uiState.value.copy(
                 projects = allProjects,
-                isLoading = false
+                isLoading = false,
+                allRegions = allRegions,
+                allDates = allDates
             )
 
             // Always try to select the project matching current capture project on entry
@@ -97,13 +112,39 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun setFilterRegion(region: String) {
+        _uiState.update { it.copy(filterRegion = region) }
+        updateCandidateProjects()
+    }
+
+    fun setFilterDate(date: String) {
+        _uiState.update { it.copy(filterDate = date) }
+        updateCandidateProjects()
+    }
+
     private fun updateCandidateProjects() {
         val all = _uiState.value.projects
         val selected = _uiState.value.selectedProject
-        val candidates = if (selected != null) {
-            all.filter { it.projectName != selected.projectName }
+        val filterRegion = _uiState.value.filterRegion
+        val filterDate = _uiState.value.filterDate
+        val filtered = all.filter { project ->
+            (filterRegion.isBlank() || project.region == filterRegion) &&
+                    (filterDate.isBlank() || project.date == filterDate)
+        }
+
+        val selectedStillValid = selected?.let { sel ->
+            (filterRegion.isBlank() || sel.region == filterRegion) &&
+                    (filterDate.isBlank() || sel.date == filterDate)
+        } ?: true
+
+        if (!selectedStillValid) {
+            _uiState.update { it.copy(selectedProject = null, photos = emptyList()) }
+        }
+
+        val candidates = if (selected != null && selectedStillValid) {
+            filtered.filter { it.projectName != selected.projectName }
         } else {
-            all
+            filtered
         }
         _uiState.value = _uiState.value.copy(candidateProjects = candidates)
     }
@@ -237,6 +278,7 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
             }
             if (result) {
                 _deleteMessage.value = "已删除项目 ${project.projectName}"
+                _uiState.update { it.copy(selectedProject = null) }
                 loadProjects()
             } else {
                 _deleteMessage.value = "删除项目失败，请重试"
@@ -246,6 +288,36 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
 
     fun clearDeleteMessage() {
         _deleteMessage.value = null
+    }
+
+    fun clearImportMessage() {
+        _importMessage.value = null
+    }
+
+    fun showToast(message: String) {
+        _importMessage.value = message
+    }
+
+    /** Execute import plan in IO thread and return result message. */
+    fun executeImport(plan: ImportPlan, overwriteExisting: Boolean, tempFile: File? = null) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                ProjectImportManager.executeImport(
+                    getApplication(),
+                    plan,
+                    overwriteExisting = overwriteExisting
+                )
+            }
+            tempFile?.delete()
+            val msg = when (result) {
+                is com.example.easycamera.data.imports.ImportResult.Success ->
+                    "导入完成：成功 ${result.importedCount} 张，跳过 ${result.skippedCount} 张"
+                is com.example.easycamera.data.imports.ImportResult.Error -> result.message
+                else -> "导入失败"
+            }
+            _importMessage.value = msg
+            loadProjects()
+        }
     }
 
     /** Checks if the target field+sample combination already has photos in the current project. */

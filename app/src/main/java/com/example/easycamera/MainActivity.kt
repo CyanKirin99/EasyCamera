@@ -45,7 +45,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -64,7 +67,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -101,9 +103,6 @@ import com.example.easycamera.camera.CameraPreview
 import com.example.easycamera.camera.rememberImageCaptureState
 import com.example.easycamera.camera.takePhoto
 import com.example.easycamera.data.location.LocationProvider
-import com.example.easycamera.data.imports.ImportPlan
-import com.example.easycamera.data.imports.ImportResult
-import com.example.easycamera.data.imports.ProjectImportManager
 import com.example.easycamera.data.model.CaptureMetadata
 import com.example.easycamera.data.model.CaptureSessionConfig
 import com.example.easycamera.data.model.CaptureState
@@ -181,6 +180,8 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
         }
     }
 
+    var showCamera by remember { mutableStateOf(true) }
+
     var cameraPermissionGranted by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -231,55 +232,6 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
 
     val coroutineScope = rememberCoroutineScope()
 
-    var showImportDialog by remember { mutableStateOf(false) }
-    var pendingImportPlan by remember { mutableStateOf<ImportPlan?>(null) }
-    var importResultText by remember { mutableStateOf<String?>(null) }
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            coroutineScope.launch(Dispatchers.IO) {
-                val tempFile = File(context.cacheDir, "import_temp.zip")
-                try {
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        tempFile.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    val result = ProjectImportManager.analyze(context, tempFile)
-                    withContext(Dispatchers.Main) {
-                        when (result) {
-                            is ImportResult.Ready -> {
-                                if (result.plan.hasConflicts) {
-                                    pendingImportPlan = result.plan
-                                    showImportDialog = true
-                                } else {
-                                    coroutineScope.launch(Dispatchers.IO) {
-                                        val execResult = ProjectImportManager.executeImport(
-                                            context, result.plan, overwriteExisting = false
-                                        )
-                                        withContext(Dispatchers.Main) {
-                                            importResultText = when (execResult) {
-                                                is ImportResult.Success ->
-                                                    "导入完成：成功 ${execResult.importedCount} 张，跳过 ${execResult.skippedCount} 张"
-                                                is ImportResult.Error -> execResult.message
-                                                else -> "导入失败"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            is ImportResult.Error -> { importResultText = result.message }
-                            else -> {}
-                        }
-                        tempFile.delete()
-                    }
-                } catch (e: Exception) {
-                    importResultText = "读取文件失败：${e.message ?: "未知错误"}"
-                    tempFile.delete()
-                }
-            }
-        }
-    }
-
     var dontShowNAWarning by remember { mutableStateOf(false) }
     var showNAWarningDialog by remember { mutableStateOf(false) }
     var pendingNAConfirm by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -289,6 +241,8 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
     var showOverwriteConfirmDialog by remember { mutableStateOf(false) }
     var pendingOverwriteDoCapture by remember { mutableStateOf<(() -> Unit)?>(null) }
     var overwriteExistingMatch by remember { mutableStateOf<CaptureMetadata?>(null) }
+    var showSampleOverwriteDialog by remember { mutableStateOf(false) }
+    var pendingSampleOverwriteGroup by remember { mutableStateOf<Pair<List<CaptureMetadata>, () -> Unit>?>(null) }
 
     val locationText by viewModel.locationStatus.collectAsState()
     val locationDetermined by viewModel.locationDetermined.collectAsState()
@@ -331,7 +285,12 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
         val performCapture = {
             val ic = imageCaptureState.value
             if (ic != null && !captureState.isGroupComplete && !isCapturing) {
-                val doCapture: () -> Unit = {
+                if (sessionConfig.region.isBlank()) {
+                    viewModel.setCaptureMessage("请先选择地区")
+                } else if (sessionConfig.operator.isBlank()) {
+                    viewModel.setCaptureMessage("请先选择拍摄人")
+                } else {
+                    val doCapture: () -> Unit = {
                     if (viewModel.tryStartCapture()) {
                         val dir = File(
                             context.getExternalFilesDir(null),
@@ -372,37 +331,43 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                 val curFieldCode = CaptureCodeManager.formatCode(captureState.fieldCode)
                 val curSampleCode = CaptureCodeManager.formatCode(captureState.sampleCode)
                 val curAngleCode = config.angleSequence.getOrElse(captureState.currentAngleIndex) { "?" }
-                val existingMatch = capturedMetadataList.find { meta ->
-                    meta.fieldCode == curFieldCode &&
-                            meta.sampleCode == curSampleCode &&
-                            meta.angleCode == curAngleCode
-                }
-                val dir = File(
-                    context.getExternalFilesDir(null),
-                    "EasyCamera/${config.region}_${config.date}/images"
+
+                val sampleGroupRecords = metadataRepository.findSampleGroupRecords(
+                    region = config.region,
+                    date = config.date,
+                    fieldCode = curFieldCode,
+                    sampleCode = curSampleCode
                 )
-                val outputFile = File(dir, viewModel.previewFileName)
-                val dbMatch = if (existingMatch == null && !outputFile.exists()) {
-                    metadataRepository.findMatchingRecord(
-                        region = config.region,
-                        date = config.date,
-                        fieldCode = curFieldCode,
-                        sampleCode = curSampleCode,
-                        angleCode = curAngleCode
-                    )
-                } else null
-                if (existingMatch != null || outputFile.exists() || dbMatch != null) {
-                    overwriteExistingMatch = existingMatch ?: dbMatch
-                    pendingOverwriteDoCapture = doCapture
-                    showOverwriteConfirmDialog = true
-                } else if ((!locationDetermined || isLocationNA) && !dontShowNAWarning) {
-                    pendingNAConfirm = doCapture
-                    showNAWarningDialog = true
+                val currentFilenames = capturedMetadataList.map { it.filename }.toSet()
+                val existingGroupRecords = sampleGroupRecords.filter { it.filename !in currentFilenames }
+                if (existingGroupRecords.isNotEmpty()) {
+                    pendingSampleOverwriteGroup = existingGroupRecords to doCapture
+                    showSampleOverwriteDialog = true
                 } else {
-                    doCapture()
+                    val existingMatch = capturedMetadataList.find { meta ->
+                        meta.fieldCode == curFieldCode &&
+                                meta.sampleCode == curSampleCode &&
+                                meta.angleCode == curAngleCode
+                    }
+                    val dir = File(
+                        context.getExternalFilesDir(null),
+                        "EasyCamera/${config.region}_${config.date}/images"
+                    )
+                    val outputFile = File(dir, viewModel.previewFileName)
+                    if (existingMatch != null || outputFile.exists()) {
+                        overwriteExistingMatch = existingMatch
+                        pendingOverwriteDoCapture = doCapture
+                        showOverwriteConfirmDialog = true
+                    } else if ((!locationDetermined || isLocationNA) && !dontShowNAWarning) {
+                        pendingNAConfirm = doCapture
+                        showNAWarningDialog = true
+                    } else {
+                        doCapture()
+                    }
                 }
             }
         }
+    }
 
         // 全局音量键监听：通过 Activity.onKeyDown 拦截，按音量+/-触发拍照
         val mainActivity = LocalContext.current as? MainActivity
@@ -469,43 +434,140 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                     .clipToBounds(),
                 contentAlignment = Alignment.Center
             ) {
-                if (cameraPermissionGranted) {
+                if (cameraPermissionGranted && showCamera) {
                     CameraPreview(
                         modifier = Modifier.fillMaxSize(),
                         imageCaptureState = imageCaptureState
                     )
                 } else {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "需要相机权限才能拍照",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("授予相机权限")
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!cameraPermissionGranted) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "需要相机权限才能拍照",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("授予相机权限")
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "相机已关闭",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
                 if (capturedPreviewPath != null) {
                     val previewPath = capturedPreviewPath!!
-                    val painter = rememberAsyncImagePainter(
-                        model = ImageRequest.Builder(context)
-                            .data(File(previewPath))
-                            .crossfade(true)
-                            .build()
-                    )
-                    Image(
-                        painter = painter,
-                        contentDescription = "已拍摄照片，点击重拍",
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clickable { showRetakeConfirmDialog = true },
-                        contentScale = ContentScale.Crop
-                    )
+                            .clickable { showRetakeConfirmDialog = true }
+                    ) {
+                        val painter = rememberAsyncImagePainter(
+                            model = ImageRequest.Builder(context)
+                                .data(File(previewPath))
+                                .crossfade(true)
+                                .build()
+                        )
+                        Image(
+                            painter = painter,
+                            contentDescription = "已拍摄照片，点击重拍",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Transparent)
+                                .padding(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Color.Transparent,
+                                        RoundedCornerShape(4.dp)
+                                    )
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .background(
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                                        RoundedCornerShape(bottomEnd = 8.dp, topStart = 4.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = "✓ 已拍摄",
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = viewModel.currentAngleLabel,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 8.dp)
+                                    .background(
+                                        Color.Black.copy(alpha = 0.6f),
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "点击重拍",
+                                    color = Color.White,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                ) {
+                    IconButton(
+                        onClick = { showCamera = !showCamera },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(
+                                Color.Black.copy(alpha = 0.5f),
+                                RoundedCornerShape(8.dp)
+                            )
+                    ) {
+                        Icon(
+                            imageVector = if (showCamera) Icons.Default.Videocam else Icons.Default.VideocamOff,
+                            contentDescription = if (showCamera) "关闭相机预览" else "打开相机预览",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             }
         }
@@ -521,6 +583,38 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                 onIncrementSample = { viewModel.incrementSampleCode() },
                 progressLabel = viewModel.progressLabel
             )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Optional sample info fields: Bbch and Plant Height
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = sessionConfig.bbch,
+                    onValueChange = { viewModel.updateBbch(it) },
+                    label = { Text("bbch", fontSize = 11.sp) },
+                    placeholder = { Text("生育期", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).height(40.dp),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    shape = RoundedCornerShape(6.dp)
+                )
+                OutlinedTextField(
+                    value = sessionConfig.plantHeight,
+                    onValueChange = { viewModel.updatePlantHeight(it) },
+                    label = { Text("株高(cm)", fontSize = 11.sp) },
+                    placeholder = { Text("可选", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).height(40.dp),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    shape = RoundedCornerShape(6.dp)
+                )
+            }
 
             Spacer(modifier = Modifier.height(6.dp))
 
@@ -600,17 +694,12 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                 captureMessage = captureMessage,
                 metadataWriteFailed = metadataWriteFailed,
                 previewFileName = viewModel.previewFileName,
-                onOpenGallery = { showPhotoGallery = true },
-                onImport = {
-                    importLauncher.launch(arrayOf("application/zip"))
-                }
+                onOpenGallery = { showPhotoGallery = true }
             )
 
             Spacer(modifier = Modifier.height(4.dp))
         }
     }
-}
-
     if (showFieldEditDialog) {
         FieldEditDialog(viewModel)
     }
@@ -772,6 +861,73 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
         )
     }
 
+    if (showSampleOverwriteDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showSampleOverwriteDialog = false
+                pendingSampleOverwriteGroup = null
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("警告：该样本组已有数据") },
+            text = {
+                val group = pendingSampleOverwriteGroup?.first
+                if (group != null && group.isNotEmpty()) {
+                    val sample = group.first()
+                    Text(
+                        "田块 ${sample.fieldCode} 样本 ${sample.sampleCode} 在下辖项目 ${sample.region}_${sample.date} 中已有 ${group.size} 张照片。\n\n" +
+                                "覆盖将永久删除该样本组的所有已有照片和记录，此操作不可恢复。\n\n" +
+                                "是否继续？"
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSampleOverwriteDialog = false
+                        val pair = pendingSampleOverwriteGroup
+                        pendingSampleOverwriteGroup = null
+                        if (pair != null) {
+                            val (records, captureAction) = pair
+                            val sample = records.first()
+                            val imagesDir = File(
+                                context.getExternalFilesDir(null),
+                                "EasyCamera/${sample.region}_${sample.date}/images"
+                            )
+                            val prefix = "${sample.region}_${sample.date}_${sample.fieldCode}_${sample.sampleCode}_"
+                            imagesDir.listFiles()?.forEach { file ->
+                                if (file.name.startsWith(prefix)) {
+                                    try { file.delete() } catch (_: Exception) { }
+                                }
+                            }
+                            metadataRepository.deleteSampleGroup(
+                                region = sample.region,
+                                date = sample.date,
+                                fieldCode = sample.fieldCode,
+                                sampleCode = sample.sampleCode
+                            )
+                            viewModel.forceAllowCaptureForCurrentAngle()
+                            captureAction()
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("覆盖")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showSampleOverwriteDialog = false
+                    pendingSampleOverwriteGroup = null
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     if (showExitConfirm) {
         AlertDialog(
             onDismissRequest = { showExitConfirm = false },
@@ -796,75 +952,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
             }
         )
     }
-
-    LaunchedEffect(importResultText) {
-        if (importResultText != null) {
-            Toast.makeText(context, importResultText, Toast.LENGTH_LONG).show()
-            importResultText = null
-        }
-    }
-
-    if (showImportDialog && pendingImportPlan != null) {
-        val plan = pendingImportPlan!!
-        var overwrite by remember { mutableStateOf(false) }
-        AlertDialog(
-            onDismissRequest = {
-                showImportDialog = false
-                pendingImportPlan = null
-            },
-            shape = RoundedCornerShape(12.dp),
-            title = { Text("导入检测到冲突") },
-            text = {
-                Column {
-                    Text(
-                        text = "压缩包中包含 ${plan.entries.size} 张照片，其中 ${plan.entries.count { it.exists }} 张已存在于本地。",
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable { overwrite = !overwrite }
-                    ) {
-                        Checkbox(
-                            checked = overwrite,
-                            onCheckedChange = { overwrite = !overwrite }
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("覆盖已存在的文件")
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showImportDialog = false
-                    pendingImportPlan = null
-                    coroutineScope.launch(Dispatchers.IO) {
-                        val execResult = ProjectImportManager.executeImport(
-                            context, plan, overwriteExisting = overwrite
-                        )
-                        withContext(Dispatchers.Main) {
-                            importResultText = when (execResult) {
-                                is ImportResult.Success ->
-                                    "导入完成：成功 ${execResult.importedCount} 张，跳过 ${execResult.skippedCount} 张"
-                                is ImportResult.Error -> execResult.message
-                                else -> "导入失败"
-                            }
-                        }
-                    }
-                }) {
-                    Text("开始导入")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showImportDialog = false
-                    pendingImportPlan = null
-                }) {
-                    Text("取消")
-                }
-            }
-        )
-    }
+}
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -888,15 +976,20 @@ fun CompactInfoBar(
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Box {
             AssistChip(
                 onClick = { regionExpanded = true },
-                label = { Text(sessionConfig.region, fontSize = 14.sp) },
-                leadingIcon = { Text("地区", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                label = {
+                    Text(
+                        if (sessionConfig.region.isNotEmpty()) sessionConfig.region else "请选择",
+                        fontSize = 14.sp
+                    )
+                },
+                leadingIcon = { Text("地区", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(34.dp)
+                modifier = Modifier.height(36.dp)
             )
             DropdownMenu(
                 expanded = regionExpanded,
@@ -933,9 +1026,9 @@ fun CompactInfoBar(
                         fontSize = 14.sp
                     )
                 },
-                leadingIcon = { Text("日期", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                leadingIcon = { Text("日期", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(34.dp)
+                modifier = Modifier.height(36.dp)
             )
         }
 
@@ -949,12 +1042,7 @@ fun CompactInfoBar(
             cal.set(Calendar.SECOND, 0)
             cal.set(Calendar.MILLISECOND, 0)
             val datePickerState = rememberDatePickerState(
-                initialSelectedDateMillis = cal.timeInMillis,
-                selectableDates = object : SelectableDates {
-                    override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-                        return utcTimeMillis <= System.currentTimeMillis()
-                    }
-                }
+                initialSelectedDateMillis = cal.timeInMillis
             )
             DatePickerDialog(
                 onDismissRequest = { showDatePicker = false },
@@ -995,10 +1083,16 @@ fun CompactInfoBar(
         Box {
             AssistChip(
                 onClick = { operatorExpanded = true },
-                label = { Text(sessionConfig.operator, fontSize = 14.sp, maxLines = 1) },
-                leadingIcon = { Text("拍摄人", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                label = {
+                    Text(
+                        if (sessionConfig.operator.isNotEmpty()) sessionConfig.operator else "请选择",
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
+                },
+                leadingIcon = { Text("拍摄人", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(34.dp)
+                modifier = Modifier.height(36.dp)
             )
             DropdownMenu(
                 expanded = operatorExpanded,
@@ -1057,10 +1151,10 @@ fun CompactCodeAngleBar(
             .fillMaxWidth()
             .background(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                RoundedCornerShape(8.dp)
+                RoundedCornerShape(10.dp)
             )
-            .padding(horizontal = 8.dp, vertical = 1.dp),
-        verticalArrangement = Arrangement.spacedBy(1.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1068,48 +1162,48 @@ fun CompactCodeAngleBar(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("田块", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("田块", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(
                     onClick = onDecrementField,
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
-                    modifier = Modifier.height(18.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    modifier = Modifier.height(24.dp)
                 ) { Text("-", fontSize = 16.sp) }
                 Text(
                     text = CaptureCodeManager.formatCode(captureState.fieldCode),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 1.dp)
+                    modifier = Modifier.padding(horizontal = 4.dp)
                 )
                 TextButton(
                     onClick = onIncrementField,
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
-                    modifier = Modifier.height(18.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    modifier = Modifier.height(24.dp)
                 ) { Text("+", fontSize = 16.sp) }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("样本", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("样本", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(
                     onClick = onDecrementSample,
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
-                    modifier = Modifier.height(18.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    modifier = Modifier.height(24.dp)
                 ) { Text("-", fontSize = 16.sp) }
                 Text(
                     text = CaptureCodeManager.formatCode(captureState.sampleCode),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 1.dp)
+                    modifier = Modifier.padding(horizontal = 4.dp)
                 )
                 TextButton(
                     onClick = onIncrementSample,
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
-                    modifier = Modifier.height(18.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    modifier = Modifier.height(24.dp)
                 ) { Text("+", fontSize = 16.sp) }
             }
 
             Text(
                 text = progressLabel,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium
             )
@@ -1117,7 +1211,7 @@ fun CompactCodeAngleBar(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val angleSequence = listOf("A", "B", "C", "D")
             angleSequence.forEachIndexed { index, angle ->
@@ -1350,8 +1444,7 @@ fun CompactBottomBar(
     captureMessage: String?,
     metadataWriteFailed: Boolean,
     previewFileName: String,
-    onOpenGallery: () -> Unit,
-    onImport: () -> Unit
+    onOpenGallery: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1387,22 +1480,11 @@ fun CompactBottomBar(
                 modifier = Modifier.weight(1f)
             )
 
-            OutlinedButton(
-                onClick = onImport,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                shape = RoundedCornerShape(6.dp),
-                modifier = Modifier.height(32.dp)
-            ) {
-                Text("导入", fontSize = 13.sp)
-            }
-
-            OutlinedButton(
+            IconButton(
                 onClick = onOpenGallery,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                shape = RoundedCornerShape(6.dp),
-                modifier = Modifier.height(32.dp)
+                modifier = Modifier.size(32.dp)
             ) {
-                Text("照片集", fontSize = 13.sp)
+                Icon(Icons.Default.Collections, contentDescription = "照片集", tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
