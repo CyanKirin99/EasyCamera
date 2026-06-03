@@ -245,8 +245,9 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
     LaunchedEffect(locationPermissionGranted) {
         if (locationPermissionGranted) {
             viewModel.setLocationStatus("定位中...")
-            val loc = locationProvider.getLocation()
-            viewModel.updateLocation(loc)
+            var errMsg: String? = null
+            val loc = locationProvider.getLocation { errMsg = it }
+            viewModel.updateLocation(loc, errorStatus = errMsg)
         }
     }
 
@@ -452,8 +453,9 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                     } else {
                         viewModel.setLocationStatus("定位中...")
                         coroutineScope.launch {
-                            val loc = locationProvider.getLocation()
-                            viewModel.updateLocation(loc)
+                            var errMsg: String? = null
+                            val loc = locationProvider.getLocation { errMsg = it }
+                            viewModel.updateLocation(loc, errorStatus = errMsg)
                         }
                     }
                 }
@@ -727,8 +729,9 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
             onFieldChanged = {
                 coroutineScope.launch {
                     viewModel.setLocationStatus("定位中...")
-                    val loc = locationProvider.getLocation()
-                    viewModel.updateLocation(loc)
+                    var errMsg: String? = null
+                    val loc = locationProvider.getLocation { errMsg = it }
+                    viewModel.updateLocation(loc, errorStatus = errMsg)
                 }
             }
         )

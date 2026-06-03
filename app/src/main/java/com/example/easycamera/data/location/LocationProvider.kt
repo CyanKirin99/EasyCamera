@@ -45,8 +45,11 @@ class LocationProvider(private val context: Context) {
         }
     }
 
-    suspend fun getLocation(): LocationInfo? {
-        if (!hasPermission()) return null
+    suspend fun getLocation(onStatus: (String) -> Unit = {}): LocationInfo? {
+        if (!hasPermission()) {
+            onStatus("定位权限未授予")
+            return null
+        }
 
         return try {
             suspendCancellableCoroutine { cont ->
@@ -71,8 +74,10 @@ class LocationProvider(private val context: Context) {
                         val errCode = aMapLocation?.errorCode ?: -1
                         val errInfo = aMapLocation?.errorInfo ?: "未知错误"
                         val sha1 = getCurrentSha1()
-                        android.util.Log.w("LocationProvider", "高德定位失败: errorCode=$errCode, errorInfo=$errInfo")
-                        android.util.Log.w("LocationProvider", "当前APK使用的SHA1=$sha1, 包名=${context.packageName}")
+                        val errorMsg = "高德定位错误($errCode): $errInfo"
+                        android.util.Log.w("LocationProvider", errorMsg)
+                        android.util.Log.w("LocationProvider", "SHA1=$sha1 包名=${context.packageName}")
+                        onStatus(errorMsg)
                         cont.resume(null)
                     }
                     client.stopLocation()
@@ -88,6 +93,7 @@ class LocationProvider(private val context: Context) {
         } catch (e: Exception) {
             val sha1 = getCurrentSha1()
             android.util.Log.e("LocationProvider", "定位异常: SHA1=$sha1, 包名=${context.packageName}", e)
+            onStatus("定位抛异常: ${e.message}")
             null
         }
     }

@@ -117,13 +117,13 @@ class CaptureViewModel : ViewModel() {
         _codeLockMessage.value = null
     }
 
-    fun updateLocation(location: LocationInfo?) {
+    fun updateLocation(location: LocationInfo?, errorStatus: String? = null) {
         _currentLocation.value = location
         _locationDetermined.value = true
-        _locationStatus.value = if (location != null) {
-            "定位：${String.format("%.6f", location.longitude)}, ${String.format("%.6f", location.latitude)}"
-        } else {
-            "定位不可用，将使用 NA_NA"
+        _locationStatus.value = when {
+            location != null -> "定位：${String.format("%.6f", location.longitude)}, ${String.format("%.6f", location.latitude)}"
+            errorStatus != null -> errorStatus
+            else -> "定位不可用，将使用 NA_NA"
         }
     }
 
