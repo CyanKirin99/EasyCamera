@@ -577,7 +577,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                             OutlinedTextField(
                                 value = sessionConfig.bbch,
                                 onValueChange = { viewModel.updateBbch(it) },
-                                label = { Text("bbch", fontSize = 11.sp) },
+                                label = { Text("BBCH", fontSize = 11.sp) },
                                 placeholder = { Text("生育期", fontSize = 11.sp) },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),

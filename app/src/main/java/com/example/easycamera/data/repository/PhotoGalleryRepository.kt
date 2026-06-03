@@ -131,7 +131,7 @@ class PhotoGalleryRepository(private val context: Context) {
         val imagesDir = File(project.imageDirPath)
         if (!imagesDir.exists() || !imagesDir.isDirectory) return emptyList()
 
-        // Load metadata CSV to get bbch/plantHeight values
+        // Load metadata CSV to get BBCH/plantHeight values
         val metadataRepo = MetadataRepository(context)
         val allMetadata = metadataRepo.readAllMetadata(project.region, project.date)
         val metadataByKey = allMetadata.groupBy { "${it.fieldCode}_${it.sampleCode}_${it.angleCode}" }

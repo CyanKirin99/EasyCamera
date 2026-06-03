@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -983,6 +985,7 @@ fun ProjectSelectorBar(
 
 data class SampleDisplay(
     val sampleCode: String,
+    val fieldCode: String = "",
     val angles: Map<String, CapturedPhoto?>,
     val bbch: String = "",
     val plantHeight: String = ""
@@ -997,7 +1000,7 @@ private val ANGLE_ORDER = listOf("A", "B", "C", "D")
 
 fun organizePhotos(photos: List<CapturedPhoto>): List<FieldDisplay> {
     val byField = photos.groupBy { it.fieldCode }
-        .mapValues { (_, fieldPhotos) ->
+        .mapValues { (fieldCode, fieldPhotos) ->
             val bySample = fieldPhotos.groupBy { it.sampleCode }
                 .mapValues { (_, samplePhotos) ->
                     samplePhotos.associateBy { it.angleCode }
@@ -1016,6 +1019,7 @@ fun organizePhotos(photos: List<CapturedPhoto>): List<FieldDisplay> {
                     ?: allPhotos.firstOrNull()?.plantHeight ?: ""
                 SampleDisplay(
                     sampleCode = sampleCode,
+                    fieldCode = fieldCode,
                     angles = ANGLE_ORDER.associateWith { angle ->
                         angles[angle]
                     },
@@ -1212,129 +1216,97 @@ fun CsvViewerDialog(
                         Spacer(modifier = Modifier.height(4.dp))
                     }
 
-                    // Scrollable table
-                    val scrollState = rememberScrollState()
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(scrollState)
-                    ) {
-                        // Header row
-                        val headers = filteredData.firstOrNull() ?: emptyList()
-                        if (headers.isNotEmpty()) {
+                    // Scrollable table with frozen header
+                    val headers = filteredData.firstOrNull() ?: emptyList()
+                    val vScrollState = rememberScrollState()
+                    val hScrollState = rememberScrollState()
+
+                    // 根据字段名估算列宽
+                    fun colMinWidth(header: String): androidx.compose.ui.unit.Dp {
+                        return when {
+                            header.contains("longitude") || header.contains("latitude")
+                                || header.contains("经度") || header.contains("纬度") -> 110.dp
+                            header.contains("filename") || header.contains("文件") -> 160.dp
+                            header.contains("timestamp") || header.contains("时间") -> 130.dp
+                            header.contains("region") || header.contains("date") -> 80.dp
+                            header.contains("photographer") || header.contains("拍摄")
+                                || header.contains("notes") || header.contains("备注")
+                                || header.contains("crop") || header.contains("作物") -> 90.dp
+                            else -> 64.dp
+                        }
+                    }
+
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column {
+                            // Header row — frozen (inside horizontal scroll)
                             Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
+                                    .horizontalScroll(hScrollState)
                                     .background(MaterialTheme.colorScheme.primaryContainer)
-                                    .padding(vertical = 6.dp, horizontal = 8.dp)
+                                    .padding(vertical = 6.dp)
                             ) {
                                 Text(
                                     text = "#",
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.width(28.dp)
+                                    modifier = Modifier
+                                        .width(36.dp)
+                                        .padding(horizontal = 6.dp)
                                 )
-                                Text(
-                                    text = "田块",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.width(48.dp)
-                                )
-                                Text(
-                                    text = "样本",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.width(48.dp)
-                                )
-                                Text(
-                                    text = "角度",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.width(48.dp)
-                                )
-                                Text(
-                                    text = "BBCH",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.width(56.dp)
-                                )
-                                Text(
-                                    text = "株高",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.width(56.dp)
-                                )
-                                Text(
-                                    text = "经度",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Text(
-                                    text = "纬度",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                headers.forEach { header ->
+                                    Text(
+                                        text = header.replaceFirstChar { it.uppercase() },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier
+                                            .width(colMinWidth(header))
+                                            .padding(horizontal = 6.dp),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
-                        }
+                            HorizontalDivider()
 
-                        // Data rows
-                        filteredData.drop(1).forEachIndexed { index, row ->
-                            val bgColor = if (index % 2 == 0) Color.Transparent
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(bgColor)
-                                    .padding(vertical = 4.dp, horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${index + 1}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.width(28.dp)
-                                )
-                                Text(
-                                    text = row.getOrElse(2) { "" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(48.dp)
-                                )
-                                Text(
-                                    text = row.getOrElse(3) { "" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(48.dp)
-                                )
-                                Text(
-                                    text = row.getOrElse(4) { "" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(48.dp)
-                                )
-                                Text(
-                                    text = row.getOrElse(12) { "" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(56.dp)
-                                )
-                                Text(
-                                    text = row.getOrElse(13) { "" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(56.dp)
-                                )
-                                Text(
-                                    text = row.getOrElse(5) { "" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = row.getOrElse(6) { "" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1
-                                )
+                            // Data rows — vertically scrollable
+                            Row(modifier = Modifier.horizontalScroll(hScrollState)) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(vScrollState)
+                                ) {
+                                    filteredData.drop(1).forEachIndexed { index, row ->
+                                        val bgColor = if (index % 2 == 0) Color.Transparent
+                                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(bgColor)
+                                                .padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "${index + 1}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier
+                                                    .width(36.dp)
+                                                    .padding(horizontal = 6.dp)
+                                            )
+                                            headers.indices.forEach { colIdx ->
+                                                Text(
+                                                    text = row.getOrElse(colIdx) { "" },
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    modifier = Modifier
+                                                        .width(colMinWidth(headers[colIdx]))
+                                                        .padding(horizontal = 6.dp),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1356,6 +1328,24 @@ fun PhotoGrid(
 ) {
     var previewPhoto by remember { mutableStateOf<CapturedPhoto?>(null) }
     var editingSample by remember { mutableStateOf<SampleDisplay?>(null) }
+    val editingFieldIndex = remember { mutableStateOf(-1) }
+
+    // When editing starts, remember the field index; when it ends, scroll back to it
+    LaunchedEffect(editingSample) {
+        if (editingSample != null) {
+            editingFieldIndex.value = fields.indexOfFirst { it.fieldCode == editingSample!!.fieldCode }
+        } else if (editingFieldIndex.value >= 0 && editingFieldIndex.value < fields.size) {
+            // Small delay to allow UI to settle from dialog dismiss and data refresh
+            kotlinx.coroutines.delay(200)
+            if (editingSample == null) { // re-check in case user opened another dialog
+                val target = editingFieldIndex.value
+                if (target >= 0 && target < gridListState.layoutInfo.totalItemsCount) {
+                    gridListState.animateScrollToItem(target)
+                }
+                editingFieldIndex.value = -1
+            }
+        }
+    }
 
     LazyColumn(
         state = gridListState,
@@ -1759,7 +1749,7 @@ fun SampleEditDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(16.dp),
         title = {
-            Text(text = "编辑样本 ${sample.sampleCode}")
+            Text(text = "正在编辑田块${sample.fieldCode} 样本${sample.sampleCode}")
         },
         text = {
             Column {

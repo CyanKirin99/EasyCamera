@@ -22,7 +22,7 @@ class MetadataRepository(private val context: Context) {
             "filename",
             "relative_path",
             "file_path",
-            "bbch",
+            "BBCH",
             "plant_height",
             "extra_fields"
         )
@@ -403,7 +403,7 @@ class MetadataRepository(private val context: Context) {
     }
 
     /**
-     * Updates bbch and plantHeight for ALL rows matching (region, date, fieldCode, sampleCode)
+     * Updates BBCH and plantHeight for ALL rows matching (region, date, fieldCode, sampleCode)
      * in a single CSV read/write cycle. This avoids race conditions when updating multiple angles.
      * Normalizes fieldCode and sampleCode to handle "1" vs "01" format mismatches.
      */
@@ -462,7 +462,7 @@ class MetadataRepository(private val context: Context) {
     }
 
     /**
-     * Updates the bbch and plantHeight fields for a specific metadata record
+     * Updates the BBCH and plantHeight fields for a specific metadata record
      * matching (region, date, fieldCode, sampleCode, angleCode).
      * Normalizes fieldCode and sampleCode to handle "1" vs "01" format mismatches.
      */

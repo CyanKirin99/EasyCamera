@@ -194,6 +194,8 @@ private fun AMapMapView(
 
         // 卫星地图更适合农业场景
         aMap.mapType = AMap.MAP_TYPE_SATELLITE
+        // 限制最大缩放级别，避免放大到无卫星影像的区域
+        aMap.setMaxZoomLevel(18f)
 
         aMap.clear()
 
