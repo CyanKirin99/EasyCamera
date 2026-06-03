@@ -354,6 +354,175 @@ class MetadataRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Reads ALL metadata records from a project's CSV file.
+     * Returns empty list if the file does not exist or cannot be read.
+     */
+    fun readAllMetadata(region: String, date: String): List<CaptureMetadata> {
+        val result = mutableListOf<CaptureMetadata>()
+        try {
+            val file = getMetadataFile(region, date)
+            if (file.exists()) {
+                val allLines = CsvUtils.readAllLines(file)
+                if (allLines.size >= 2) {
+                    for (row in allLines.drop(1)) {
+                        if (row.size >= 12) {
+                            result.add(
+                                CaptureMetadata(
+                                    region = row[0],
+                                    date = row[1],
+                                    fieldCode = row[2],
+                                    sampleCode = row[3],
+                                    angleCode = row[4],
+                                    longitude = row.getOrElse(5) { "" },
+                                    latitude = row.getOrElse(6) { "" },
+                                    operator = row.getOrElse(7) { "" },
+                                    captureTime = row.getOrElse(8) { "" },
+                                    filename = row.getOrElse(9) { "" },
+                                    relativePath = row.getOrElse(10) { "" },
+                                    filePath = row.getOrElse(11) { "" },
+                                    bbch = row.getOrElse(12) { "" },
+                                    plantHeight = row.getOrElse(13) { "" },
+                                    extraFields = parseExtraFields(row.getOrElse(14) { "" })
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        return result
+    }
+
+    /**
+     * Finds all metadata records matching (region, date, operator).
+     * Returns empty list if no matches found.
+     */
+    fun findOperatorRecords(region: String, date: String, operator: String): List<CaptureMetadata> {
+        return readAllMetadata(region, date).filter { it.operator == operator }
+    }
+
+    /**
+     * Updates bbch and plantHeight for ALL rows matching (region, date, fieldCode, sampleCode)
+     * in a single CSV read/write cycle. This avoids race conditions when updating multiple angles.
+     * Normalizes fieldCode and sampleCode to handle "1" vs "01" format mismatches.
+     */
+    fun updateSampleBbchAndPlantHeight(
+        region: String,
+        date: String,
+        fieldCode: String,
+        sampleCode: String,
+        bbch: String,
+        plantHeight: String
+    ): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return false
+
+            // Normalize codes for robust matching
+            val fcNorm = fieldCode.toIntOrNull()?.let { it.toString().padStart(2, '0') } ?: fieldCode
+            val scNorm = sampleCode.toIntOrNull()?.let { it.toString().padStart(2, '0') } ?: sampleCode
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return false
+
+            var matchCount = 0
+            val updatedData = allLines.drop(1).map { row ->
+                // Normalize row codes too for comparison
+                val rowFc = (row.getOrElse(2) { "" }).toIntOrNull()?.let { it.toString().padStart(2, '0') } ?: row.getOrElse(2) { "" }
+                val rowSc = (row.getOrElse(3) { "" }).toIntOrNull()?.let { it.toString().padStart(2, '0') } ?: row.getOrElse(3) { "" }
+
+                if (row.size >= 5 &&
+                    row[0] == region &&
+                    row[1] == date &&
+                    rowFc == fcNorm &&
+                    rowSc == scNorm
+                ) {
+                    matchCount++
+                    row.toMutableList().apply {
+                        while (this.size < 15) this.add("")
+                        this[12] = bbch
+                        this[13] = plantHeight
+                    }
+                } else {
+                    row
+                }
+            }
+
+            if (matchCount == 0) {
+                android.util.Log.w("MetadataRepo", "updateSampleBbchAndPlantHeight: no rows matched for region=$region date=$date field=$fcNorm sample=$scNorm")
+                return false
+            }
+
+            return rewriteCsv(file, updatedData)
+        } catch (e: Exception) {
+            android.util.Log.e("MetadataRepo", "updateSampleBbchAndPlantHeight error", e)
+            false
+        }
+    }
+
+    /**
+     * Updates the bbch and plantHeight fields for a specific metadata record
+     * matching (region, date, fieldCode, sampleCode, angleCode).
+     * Normalizes fieldCode and sampleCode to handle "1" vs "01" format mismatches.
+     */
+    fun updateBbchAndPlantHeight(
+        region: String,
+        date: String,
+        fieldCode: String,
+        sampleCode: String,
+        angleCode: String,
+        bbch: String,
+        plantHeight: String
+    ): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return false
+
+            // Normalize codes for robust matching
+            val fcNorm = fieldCode.toIntOrNull()?.let { it.toString().padStart(2, '0') } ?: fieldCode
+            val scNorm = sampleCode.toIntOrNull()?.let { it.toString().padStart(2, '0') } ?: sampleCode
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return false
+
+            var matchCount = 0
+            val updatedData = allLines.drop(1).map { row ->
+                // Normalize row codes too for comparison
+                val rowFc = (row.getOrElse(2) { "" }).toIntOrNull()?.let { it.toString().padStart(2, '0') } ?: row.getOrElse(2) { "" }
+                val rowSc = (row.getOrElse(3) { "" }).toIntOrNull()?.let { it.toString().padStart(2, '0') } ?: row.getOrElse(3) { "" }
+
+                // Match by key fields regardless of total column count (>= 5 is enough)
+                if (row.size >= 5 &&
+                    row[0] == region &&
+                    row[1] == date &&
+                    rowFc == fcNorm &&
+                    rowSc == scNorm &&
+                    row[4] == angleCode
+                ) {
+                    matchCount++
+                    row.toMutableList().apply {
+                        while (this.size < 15) this.add("")
+                        this[12] = bbch
+                        this[13] = plantHeight
+                    }
+                } else {
+                    row
+                }
+            }
+
+            if (matchCount == 0) {
+                android.util.Log.w("MetadataRepo", "updateBbchAndPlantHeight: no rows matched for region=$region date=$date field=$fcNorm sample=$scNorm angle=$angleCode")
+                return false
+            }
+
+            return rewriteCsv(file, updatedData)
+        } catch (e: Exception) {
+            android.util.Log.e("MetadataRepo", "updateBbchAndPlantHeight error", e)
+            false
+        }
+    }
+
     private fun rewriteCsv(file: File, dataLines: List<List<String>>): Boolean {
         val headerOk = CsvUtils.writeHeader(file, HEADERS)
         if (!headerOk) return false

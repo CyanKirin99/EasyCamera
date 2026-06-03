@@ -26,8 +26,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
@@ -159,6 +163,7 @@ fun PhotoGalleryScreen(
     var pendingNewFieldCode by remember { mutableStateOf("") }
     var showSwapConfirmDialog by remember { mutableStateOf(false) }
     var showForceOverwriteConfirmDialog by remember { mutableStateOf(false) }
+    var showCsvViewer by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -206,7 +211,7 @@ fun PhotoGalleryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("照片集") },
+                title = { Text("数据库") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Text("←", fontSize = 20.sp)
@@ -240,19 +245,8 @@ fun PhotoGalleryScreen(
                 ) {
                     CircularProgressIndicator()
                 }
-            } else if (uiState.projects.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize().weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "暂无照片。请先完成拍摄。",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             } else {
-                // Filter row (placed above candidate projects)
+                // Filter row - always visible (even without projects)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -330,11 +324,48 @@ fun PhotoGalleryScreen(
                             }
                         }
                     }
-                    if (uiState.filterRegion.isNotEmpty() || uiState.filterDate.isNotEmpty()) {
+                var filterOperatorExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        AssistChip(
+                            onClick = { filterOperatorExpanded = true },
+                            label = {
+                                Text(
+                                    if (uiState.filterOperator.isNotEmpty()) uiState.filterOperator else "全部人员",
+                                    fontSize = 13.sp
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp)
+                        )
+                        DropdownMenu(
+                            expanded = filterOperatorExpanded,
+                            onDismissRequest = { filterOperatorExpanded = false },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("全部人员") },
+                                onClick = {
+                                    filterOperatorExpanded = false
+                                    viewModel.setFilterOperator("")
+                                }
+                            )
+                            uiState.allOperators.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option) },
+                                    onClick = {
+                                        filterOperatorExpanded = false
+                                        viewModel.setFilterOperator(option)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    if (uiState.filterRegion.isNotEmpty() || uiState.filterDate.isNotEmpty() || uiState.filterOperator.isNotEmpty()) {
                         TextButton(
                             onClick = {
                                 viewModel.setFilterRegion("")
                                 viewModel.setFilterDate("")
+                                viewModel.setFilterOperator("")
                             },
                             modifier = Modifier.height(30.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp)
@@ -342,6 +373,21 @@ fun PhotoGalleryScreen(
                             Text("清除", fontSize = 11.sp)
                         }
                     }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Import button - always visible
+                OutlinedButton(
+                    onClick = { importLauncher.launch(arrayOf("application/zip")) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "导入项目",
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -357,114 +403,176 @@ fun PhotoGalleryScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                val selectedProject = uiState.selectedProject
-                if (selectedProject != null && showProjectContent) {
-                    Text(
-                        text = "当前项目：${selectedProject.projectName}",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    val photoCount = uiState.photos.size
-                    val fieldCount = uiState.photos.map { it.fieldCode }.distinct().size
-                    val sampleCount = uiState.photos.map { "${it.fieldCode}_${it.sampleCode}" }.distinct().size
-                    Text(
-                        text = "田块: $fieldCount    样本: $sampleCount    照片: $photoCount",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                // Project content (or empty message)
+                if (uiState.projects.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "暂无项目。请先导入或创建项目。",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    val selectedProject = uiState.selectedProject
+                    if (selectedProject != null && showProjectContent) {
+                        Text(
+                            text = "当前项目：${selectedProject.projectName}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val photoCount = uiState.photos.size
+                        val fieldCount = uiState.photos.map { it.fieldCode }.distinct().size
+                        val sampleCount = uiState.photos.map { "${it.fieldCode}_${it.sampleCode}" }.distinct().size
+                        Text(
+                            text = "田块: $fieldCount    样本: $sampleCount    照片: $photoCount",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedButton(
+                            onClick = { showCsvViewer = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("查看元数据", fontSize = 12.sp)
+                        }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        if (uiState.photos.isEmpty()) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "该项目暂无照片。请先完成拍摄。",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Column(modifier = Modifier.weight(1f)) {
+                            if (uiState.photos.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "该项目暂无照片。请先完成拍摄。",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            } else {
+                                val organizedData = remember(uiState.photos) {
+                                    organizePhotos(uiState.photos)
+                                }
+
+                                // 田块数轴 - 用于快捷跳转到指定田块
+                                val gridListState = rememberLazyListState()
+                                val coroutineScope = rememberCoroutineScope()
+                                val fieldCodes = remember(organizedData) {
+                                    organizedData.map { it.fieldCode }
+                                }
+
+                                // 田块数轴滚轴
+                                if (fieldCodes.size > 1) {
+                                    Text(
+                                        text = "田块导航：",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(fieldCodes) { fc ->
+                                            val isActive = gridListState.firstVisibleItemIndex.let { idx ->
+                                                idx < fieldCodes.size && fieldCodes[idx] == fc
+                                            }
+                                            FilterChip(
+                                                selected = isActive,
+                                                onClick = {
+                                                    val targetIndex = fieldCodes.indexOf(fc)
+                                                    if (targetIndex >= 0) {
+                                                        coroutineScope.launch {
+                                                            gridListState.animateScrollToItem(targetIndex)
+                                                        }
+                                                    }
+                                                },
+                                                label = {
+                                                    Text(
+                                                        text = fc,
+                                                        fontSize = 13.sp
+                                                    )
+                                                },
+                                                shape = RoundedCornerShape(6.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                }
+
+                                PhotoGrid(
+                                    fields = organizedData,
+                                    gridListState = gridListState,
+                                    onDeleteSample = { fieldCode, sampleCode ->
+                                        viewModel.deleteSampleGroup(fieldCode, sampleCode)
+                                    },
+                                    onEditFieldCode = { fieldCode, sampleCode ->
+                                        editingFieldCode = fieldCode
+                                        editingSampleCode = sampleCode
+                                        fieldEditNewValue = fieldCode
+                                        fieldEditError = null
+                                        showFieldEditDialog = true
+                                    },
+                                    onUpdateBbchPlantHeight = { photo, bbch, plantHeight ->
+                                        viewModel.updateBbchAndPlantHeight(photo, bbch, plantHeight)
+                                    },
+                                    onUpdateSampleBbchPlantHeight = { region, date, fieldCode, sampleCode, bbch, plantHeight ->
+                                        viewModel.updateSampleBbchAndPlantHeight(region, date, fieldCode, sampleCode, bbch, plantHeight)
+                                    },
+                                    modifier = Modifier.fillMaxSize()
                                 )
                             }
-                        } else {
-                            val organizedData = remember(uiState.photos) {
-                                organizePhotos(uiState.photos)
-                            }
-
-                            PhotoGrid(
-                                fields = organizedData,
-                                onDeleteSample = { fieldCode, sampleCode ->
-                                    viewModel.deleteSampleGroup(fieldCode, sampleCode)
-                                },
-                                onEditFieldCode = { fieldCode, sampleCode ->
-                                    editingFieldCode = fieldCode
-                                    editingSampleCode = sampleCode
-                                    fieldEditNewValue = fieldCode
-                                    fieldEditError = null
-                                    showFieldEditDialog = true
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                    val selectedProject = uiState.selectedProject
-                    if (selectedProject != null) {
+                        val selectedProjectForAnalysis = uiState.selectedProject
+                        if (selectedProjectForAnalysis != null) {
+                            OutlinedButton(
+                                onClick = {
+                                    onNavigateToAnalysis(selectedProjectForAnalysis.region, selectedProjectForAnalysis.date)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "分析当前项目",
+                                    fontSize = 16.sp,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
                         OutlinedButton(
-                            onClick = {
-                                onNavigateToAnalysis(selectedProject.region, selectedProject.date)
-                            },
+                            onClick = { viewModel.startExport() },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            enabled = exportState !is ExportState.Exporting
                         ) {
+                            if (exportState is ExportState.Exporting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
                             Text(
-                                text = "分析当前项目",
+                                text = if (exportState is ExportState.Exporting) "正在导出..." else "导出当前项目",
                                 fontSize = 16.sp,
                                 modifier = Modifier.padding(vertical = 4.dp)
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
-
-                    OutlinedButton(
-                        onClick = { viewModel.startExport() },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = exportState !is ExportState.Exporting
-                    ) {
-                        if (exportState is ExportState.Exporting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                        }
-                        Text(
-                            text = if (exportState is ExportState.Exporting) "正在导出..." else "导出当前项目",
-                            fontSize = 16.sp,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = { importLauncher.launch(arrayOf("application/zip")) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text(
-                    text = "导入项目",
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-            }
             Spacer(modifier = Modifier.height(20.dp))
         }
     }
@@ -790,6 +898,15 @@ fun PhotoGalleryScreen(
             }
         )
     }
+
+    if (showCsvViewer && uiState.selectedProject != null) {
+        CsvViewerDialog(
+            context = context,
+            region = uiState.selectedProject!!.region,
+            date = uiState.selectedProject!!.date,
+            onDismiss = { showCsvViewer = false }
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -866,7 +983,9 @@ fun ProjectSelectorBar(
 
 data class SampleDisplay(
     val sampleCode: String,
-    val angles: Map<String, CapturedPhoto?>
+    val angles: Map<String, CapturedPhoto?>,
+    val bbch: String = "",
+    val plantHeight: String = ""
 )
 
 data class FieldDisplay(
@@ -889,11 +1008,19 @@ fun organizePhotos(photos: List<CapturedPhoto>): List<FieldDisplay> {
 
             sampleCodes.map { sampleCode ->
                 val angles = bySample[sampleCode] ?: emptyMap()
+                // Get sample-level BBCH/plantHeight: use first non-empty value from any angle
+                val allPhotos = angles.values.filterNotNull()
+                val bbchVal = allPhotos.firstOrNull { it.bbch.isNotBlank() }?.bbch
+                    ?: allPhotos.firstOrNull()?.bbch ?: ""
+                val phVal = allPhotos.firstOrNull { it.plantHeight.isNotBlank() }?.plantHeight
+                    ?: allPhotos.firstOrNull()?.plantHeight ?: ""
                 SampleDisplay(
                     sampleCode = sampleCode,
                     angles = ANGLE_ORDER.associateWith { angle ->
                         angles[angle]
-                    }
+                    },
+                    bbch = bbchVal,
+                    plantHeight = phVal
                 )
             }
         }
@@ -909,16 +1036,329 @@ fun organizePhotos(photos: List<CapturedPhoto>): List<FieldDisplay> {
     }
 }
 
+/**
+ * Dialog that displays the metadata CSV content in a scrollable table format.
+ * Safely limits rows to prevent OOM. Data is sorted by field → sample → angle.
+ * Includes a horizontal field-code selector (滚轴) for quick navigation.
+ */
+@Composable
+fun CsvViewerDialog(
+    context: Context,
+    region: String,
+    date: String,
+    onDismiss: () -> Unit
+) {
+    val repo = remember { com.example.easycamera.data.repository.MetadataRepository(context) }
+    var csvData by remember { mutableStateOf<List<List<String>>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var isTruncated by remember { mutableStateOf(false) }
+    var selectedFieldCode by remember { mutableStateOf<String?>(null) }
+
+    // Read and sort CSV data
+    LaunchedEffect(region, date) {
+        withContext(Dispatchers.IO) {
+            val file = repo.getMetadataFile(region, date)
+            if (file.exists()) {
+                try {
+                    val allLines = com.example.easycamera.data.file.CsvUtils.readAllLines(file)
+                    if (allLines.size > 1) {
+                        val header = allLines.first()
+                        val dataRows = allLines.drop(1)
+                            // Sort by field_code (col 2) → sample_code (col 3) → angle_code (col 4)
+                            .sortedBy { row ->
+                                val fc = row.getOrElse(2) { "" }.padStart(2, '0')
+                                val sc = row.getOrElse(3) { "" }.padStart(2, '0')
+                                val ac = row.getOrElse(4) { "" }
+                                "$fc-$sc-$ac"
+                            }
+                        val maxRows = 500
+                        if (dataRows.size > maxRows) {
+                            isTruncated = true
+                            csvData = listOf(header) + dataRows.take(maxRows)
+                        } else {
+                            csvData = listOf(header) + dataRows
+                        }
+                    } else {
+                        csvData = allLines
+                    }
+                } catch (e: Exception) {
+                    csvData = emptyList()
+                }
+            }
+            isLoading = false
+        }
+    }
+
+    // Get unique field codes from data rows
+    val fieldCodes = remember(csvData) {
+        if (csvData.size < 2) emptyList()
+        else csvData.drop(1)
+            .map { it.getOrElse(2) { "" } }
+            .distinct()
+            .mapNotNull { it.toIntOrNull() }
+            .sorted()
+            .map { it.toString().padStart(2, '0') }
+    }
+
+    // Filter data by selected field code
+    val filteredData = remember(csvData, selectedFieldCode) {
+        if (selectedFieldCode == null || csvData.size < 2) csvData
+        else {
+            listOf(csvData.first()) + csvData.drop(1).filter { row ->
+                row.getOrElse(2) { "" } == selectedFieldCode
+            }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxSize(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // Title row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "元数据表格 - ${region}_${date}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (selectedFieldCode != null) {
+                        TextButton(
+                            onClick = { selectedFieldCode = null },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text("显示全部", fontSize = 12.sp)
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "关闭")
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                // Field code scroll wheel (滚轴)
+                if (fieldCodes.isNotEmpty()) {
+                    Text(
+                        text = "选择田块：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(fieldCodes) { fc ->
+                            val isSelected = fc == selectedFieldCode
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    selectedFieldCode = if (isSelected) null else fc
+                                },
+                                label = {
+                                    Text(
+                                        text = "田块${fc}",
+                                        fontSize = 13.sp
+                                    )
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else if (filteredData.isEmpty() || filteredData.size < 2) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("暂无元数据", style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else {
+                    if (isTruncated) {
+                        Text(
+                            text = "显示前500行（文件行数超过500，已截断）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+
+                    if (selectedFieldCode != null) {
+                        Text(
+                            text = "当前筛选：田块${selectedFieldCode}（共 ${filteredData.size - 1} 条）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+
+                    // Scrollable table
+                    val scrollState = rememberScrollState()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                    ) {
+                        // Header row
+                        val headers = filteredData.firstOrNull() ?: emptyList()
+                        if (headers.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(vertical = 6.dp, horizontal = 8.dp)
+                            ) {
+                                Text(
+                                    text = "#",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(28.dp)
+                                )
+                                Text(
+                                    text = "田块",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(48.dp)
+                                )
+                                Text(
+                                    text = "样本",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(48.dp)
+                                )
+                                Text(
+                                    text = "角度",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(48.dp)
+                                )
+                                Text(
+                                    text = "BBCH",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(56.dp)
+                                )
+                                Text(
+                                    text = "株高",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(56.dp)
+                                )
+                                Text(
+                                    text = "经度",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "纬度",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        // Data rows
+                        filteredData.drop(1).forEachIndexed { index, row ->
+                            val bgColor = if (index % 2 == 0) Color.Transparent
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(bgColor)
+                                    .padding(vertical = 4.dp, horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${index + 1}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(28.dp)
+                                )
+                                Text(
+                                    text = row.getOrElse(2) { "" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(48.dp)
+                                )
+                                Text(
+                                    text = row.getOrElse(3) { "" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(48.dp)
+                                )
+                                Text(
+                                    text = row.getOrElse(4) { "" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(48.dp)
+                                )
+                                Text(
+                                    text = row.getOrElse(12) { "" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(56.dp)
+                                )
+                                Text(
+                                    text = row.getOrElse(13) { "" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(56.dp)
+                                )
+                                Text(
+                                    text = row.getOrElse(5) { "" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = row.getOrElse(6) { "" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun PhotoGrid(
     fields: List<FieldDisplay>,
+    gridListState: androidx.compose.foundation.lazy.LazyListState,
     onDeleteSample: (String, String) -> Unit,
     onEditFieldCode: (String, String) -> Unit,
+    onUpdateBbchPlantHeight: (CapturedPhoto, String, String) -> Unit,
+    onUpdateSampleBbchPlantHeight: (String, String, String, String, String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var previewPhoto by remember { mutableStateOf<CapturedPhoto?>(null) }
+    var editingSample by remember { mutableStateOf<SampleDisplay?>(null) }
 
     LazyColumn(
+        state = gridListState,
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 80.dp)
@@ -929,7 +1369,8 @@ fun PhotoGrid(
                     field = field,
                     onPhotoClick = { photo -> previewPhoto = photo },
                     onDeleteSample = onDeleteSample,
-                    onEditFieldCode = onEditFieldCode
+                    onEditFieldCode = onEditFieldCode,
+                    onEditSample = { editingSample = it }
                 )
             }
         }
@@ -938,7 +1379,27 @@ fun PhotoGrid(
     if (previewPhoto != null) {
         PhotoPreviewDialog(
             photo = previewPhoto!!,
-            onDismiss = { previewPhoto = null }
+            onDismiss = { previewPhoto = null },
+            onUpdate = onUpdateBbchPlantHeight
+        )
+    }
+
+    if (editingSample != null) {
+        SampleEditDialog(
+            sample = editingSample!!,
+            onDismiss = { editingSample = null },
+            onSave = { bbch, plantHeight ->
+                val sample = editingSample!!
+                val firstPhoto = sample.angles.values.filterNotNull().firstOrNull()
+                if (firstPhoto != null) {
+                    onUpdateSampleBbchPlantHeight(
+                        firstPhoto.region, firstPhoto.date,
+                        firstPhoto.fieldCode, firstPhoto.sampleCode,
+                        bbch, plantHeight
+                    )
+                }
+                editingSample = null
+            }
         )
     }
 }
@@ -948,7 +1409,8 @@ fun FieldSection(
     field: FieldDisplay,
     onPhotoClick: (CapturedPhoto) -> Unit,
     onDeleteSample: (String, String) -> Unit,
-    onEditFieldCode: (String, String) -> Unit
+    onEditFieldCode: (String, String) -> Unit,
+    onEditSample: (SampleDisplay) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -985,7 +1447,8 @@ fun FieldSection(
                 SampleRow(
                     sample = sample,
                     onPhotoClick = onPhotoClick,
-                    onDelete = { onDeleteSample(field.fieldCode, sample.sampleCode) }
+                    onDelete = { onDeleteSample(field.fieldCode, sample.sampleCode) },
+                    onEditSample = { onEditSample(sample) }
                 )
                 if (sample != field.samples.last()) {
                     Spacer(modifier = Modifier.height(6.dp))
@@ -999,7 +1462,8 @@ fun FieldSection(
 fun SampleRow(
     sample: SampleDisplay,
     onPhotoClick: (CapturedPhoto) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onEditSample: (SampleDisplay) -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -1015,17 +1479,39 @@ fun SampleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
+            // BBCH display
+            if (sample.bbch.isNotBlank()) {
+                InfoChip("BBCH", sample.bbch)
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+            // Plant height display
+            if (sample.plantHeight.isNotBlank()) {
+                InfoChip("株高", "${sample.plantHeight}cm")
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+            // Edit icon
             IconButton(
-                                onClick = { showDeleteConfirm = true },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "删除样本组",
-                                    modifier = Modifier.size(14.dp),
-                                    tint = MaterialTheme.colorScheme.error
-                                )
-                            }
+                onClick = { onEditSample(sample) },
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "编辑BBCH/株高",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            IconButton(
+                onClick = { showDeleteConfirm = true },
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "删除样本组",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
         }
 
         LazyRow(
@@ -1136,8 +1622,13 @@ fun AngleSlot(
 @Composable
 fun PhotoPreviewDialog(
     photo: CapturedPhoto,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onUpdate: (CapturedPhoto, String, String) -> Unit = { _, _, _ -> }
 ) {
+    var bbchText by remember { mutableStateOf(photo.bbch) }
+    var plantHeightText by remember { mutableStateOf(photo.plantHeight) }
+    var showSuccess by remember { mutableStateOf(false) }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1150,7 +1641,9 @@ fun PhotoPreviewDialog(
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val painter = rememberAsyncImagePainter(
@@ -1192,15 +1685,131 @@ fun PhotoPreviewDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Button(
-                    onClick = onDismiss,
+                // BBCH input
+                OutlinedTextField(
+                    value = bbchText,
+                    onValueChange = { bbchText = it },
+                    label = { Text("BBCH") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Plant Height input
+                OutlinedTextField(
+                    value = plantHeightText,
+                    onValueChange = { plantHeightText = it },
+                    label = { Text("株高 (cm)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (showSuccess) {
+                    Text(
+                        text = "保存成功",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("关闭")
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("关闭")
+                    }
+                    Button(
+                        onClick = {
+                            onUpdate(photo, bbchText, plantHeightText)
+                            showSuccess = true
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("保存修改")
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+fun SampleEditDialog(
+    sample: SampleDisplay,
+    onDismiss: () -> Unit,
+    onSave: (bbch: String, plantHeight: String) -> Unit
+) {
+    var bbchText by remember { mutableStateOf(sample.bbch) }
+    var plantHeightText by remember { mutableStateOf(sample.plantHeight) }
+    var showSuccess by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text(text = "编辑样本 ${sample.sampleCode}")
+        },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = bbchText,
+                    onValueChange = { bbchText = it },
+                    label = { Text("BBCH") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = plantHeightText,
+                    onValueChange = { plantHeightText = it },
+                    label = { Text("株高 (cm)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                if (showSuccess) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "保存成功",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(bbchText, plantHeightText)
+                    showSuccess = true
+                },
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 @Composable

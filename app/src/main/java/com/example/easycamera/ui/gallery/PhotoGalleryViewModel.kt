@@ -31,8 +31,10 @@ data class GalleryUiState(
     val errorMessage: String? = null,
     val filterRegion: String = "",
     val filterDate: String = "",
+    val filterOperator: String = "",
     val allRegions: List<String> = emptyList(),
-    val allDates: List<String> = emptyList()
+    val allDates: List<String> = emptyList(),
+    val allOperators: List<String> = emptyList()
 )
 
 sealed class ExportState {
@@ -83,11 +85,21 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
             }
             val allRegions = allProjects.map { it.region }.distinct().sorted()
             val allDates = allProjects.map { it.date }.distinct().sortedDescending()
+            val allOperators = withContext(Dispatchers.IO) {
+                // Collect unique operator values from all metadata CSV files
+                val operators = mutableSetOf<String>()
+                for (project in allProjects) {
+                    val records = metadataRepository.readAllMetadata(project.region, project.date)
+                    records.map { it.operator }.filter { it.isNotBlank() }.forEach { operators.add(it) }
+                }
+                operators.sorted()
+            }
             _uiState.value = _uiState.value.copy(
                 projects = allProjects,
                 isLoading = false,
                 allRegions = allRegions,
-                allDates = allDates
+                allDates = allDates,
+                allOperators = allOperators
             )
 
             // Always try to select the project matching current capture project on entry
@@ -122,19 +134,42 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
         updateCandidateProjects()
     }
 
+    fun setFilterOperator(op: String) {
+        _uiState.update { it.copy(filterOperator = op) }
+        updateCandidateProjects()
+    }
+
     private fun updateCandidateProjects() {
         val all = _uiState.value.projects
         val selected = _uiState.value.selectedProject
         val filterRegion = _uiState.value.filterRegion
         val filterDate = _uiState.value.filterDate
+        val filterOperator = _uiState.value.filterOperator
+
+        // Region and date filter at project level
         val filtered = all.filter { project ->
             (filterRegion.isBlank() || project.region == filterRegion) &&
                     (filterDate.isBlank() || project.date == filterDate)
         }
 
+        // Operator filter: check if the project has any record with matching operator
+        val operatorFiltered = if (filterOperator.isNotBlank()) {
+            filtered.filter { project ->
+                val records = metadataRepository.findOperatorRecords(
+                    project.region, project.date, filterOperator
+                )
+                records.isNotEmpty()
+            }
+        } else {
+            filtered
+        }
+
         val selectedStillValid = selected?.let { sel ->
             (filterRegion.isBlank() || sel.region == filterRegion) &&
-                    (filterDate.isBlank() || sel.date == filterDate)
+                    (filterDate.isBlank() || sel.date == filterDate) &&
+                    (filterOperator.isBlank() || metadataRepository.findOperatorRecords(
+                        sel.region, sel.date, filterOperator
+                    ).isNotEmpty())
         } ?: true
 
         if (!selectedStillValid) {
@@ -142,9 +177,9 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
         }
 
         val candidates = if (selected != null && selectedStillValid) {
-            filtered.filter { it.projectName != selected.projectName }
+            operatorFiltered.filter { it.projectName != selected.projectName }
         } else {
-            filtered
+            operatorFiltered
         }
         _uiState.value = _uiState.value.copy(candidateProjects = candidates)
     }
@@ -408,6 +443,55 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
             }
             _deleteMessage.value = result
             loadPhotosForProject(project)
+        }
+    }
+
+    /**
+     * Updates BBCH and plant height for ALL photos in a sample in a single CSV write.
+     * This avoids race conditions that occur when updating each angle individually.
+     */
+    fun updateSampleBbchAndPlantHeight(region: String, date: String, fieldCode: String, sampleCode: String, bbch: String, plantHeight: String) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                metadataRepository.updateSampleBbchAndPlantHeight(
+                    region = region,
+                    date = date,
+                    fieldCode = fieldCode,
+                    sampleCode = sampleCode,
+                    bbch = bbch,
+                    plantHeight = plantHeight
+                )
+            }
+            if (result) {
+                refreshCurrentProject()
+            } else {
+                android.util.Log.w("GalleryVM", "updateSampleBbchAndPlantHeight failed for region=$region date=$date field=$fieldCode sample=$sampleCode bbch=$bbch ph=$plantHeight - no matching CSV rows found")
+                _deleteMessage.value = "更新失败：CSV中未找到匹配行(region=$region, date=$date, 田块=$fieldCode, 样本=$sampleCode)，可能是旧版本数据格式不一致"
+            }
+        }
+    }
+
+    /**
+     * Updates BBCH and plant height for a given photo.
+     */
+    fun updateBbchAndPlantHeight(photo: CapturedPhoto, bbch: String, plantHeight: String) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                metadataRepository.updateBbchAndPlantHeight(
+                    region = photo.region,
+                    date = photo.date,
+                    fieldCode = photo.fieldCode,
+                    sampleCode = photo.sampleCode,
+                    angleCode = photo.angleCode,
+                    bbch = bbch,
+                    plantHeight = plantHeight
+                )
+            }
+            if (result) {
+                refreshCurrentProject()
+            } else {
+                _deleteMessage.value = "更新失败"
+            }
         }
     }
 }

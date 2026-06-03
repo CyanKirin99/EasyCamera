@@ -131,6 +131,12 @@ class PhotoGalleryRepository(private val context: Context) {
         val imagesDir = File(project.imageDirPath)
         if (!imagesDir.exists() || !imagesDir.isDirectory) return emptyList()
 
+        // Load metadata CSV to get bbch/plantHeight values
+        val metadataRepo = MetadataRepository(context)
+        val allMetadata = metadataRepo.readAllMetadata(project.region, project.date)
+        val metadataByKey = allMetadata.groupBy { "${it.fieldCode}_${it.sampleCode}_${it.angleCode}" }
+            .mapValues { (_, list) -> list.first() }
+
         return imagesDir.listFiles()
             ?.filter { file ->
                 val name = file.name.lowercase()
@@ -139,6 +145,8 @@ class PhotoGalleryRepository(private val context: Context) {
             ?.mapNotNull { file ->
                 val parsed = FileNameParser.parse(file.name)
                 if (parsed == null) return@mapNotNull null
+                val key = "${parsed.fieldCode}_${parsed.sampleCode}_${parsed.angleCode}"
+                val meta = metadataByKey[key]
                 CapturedPhoto(
                     region = parsed.region,
                     date = parsed.date,
@@ -149,7 +157,9 @@ class PhotoGalleryRepository(private val context: Context) {
                     latitude = parsed.latitude,
                     filename = file.name,
                     filePath = file.absolutePath,
-                    lastModified = file.lastModified()
+                    lastModified = file.lastModified(),
+                    bbch = meta?.bbch ?: "",
+                    plantHeight = meta?.plantHeight ?: ""
                 )
             }
             ?.sortedWith(compareBy<CapturedPhoto> {

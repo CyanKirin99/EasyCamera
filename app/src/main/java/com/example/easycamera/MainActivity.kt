@@ -56,9 +56,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.AlertDialog
@@ -76,6 +79,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -251,6 +255,27 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
     var showAnalysis by remember { mutableStateOf(false) }
     var analysisRegion by remember { mutableStateOf("") }
     var analysisDate by remember { mutableStateOf("") }
+
+    // 复用同一个 TextureMapView，避免频繁进出分析页面时反复创建 GL 上下文导致黑屏
+    val analysisContext = LocalContext.current
+    val analysisMapView = remember { com.amap.api.maps.TextureMapView(analysisContext) }
+    val analysisAMap = remember { mutableStateOf<com.amap.api.maps.AMap?>(null) }
+    val analysisMapBundle = remember { Bundle() }
+
+    // 地图只初始化一次
+    LaunchedEffect(Unit) {
+        analysisMapView.onCreate(analysisMapBundle)
+        analysisAMap.value = analysisMapView.map
+    }
+
+    // 进入/退出分析页面时暂停/恢复地图
+    LaunchedEffect(showAnalysis) {
+        if (showAnalysis) {
+            analysisMapView.onResume()
+        } else {
+            try { analysisMapView.onPause() } catch (_: Throwable) {}
+        }
+    }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -498,85 +523,6 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                                 }
                             }
                         }
-                        if (capturedPreviewPath != null) {
-                            val previewPath = capturedPreviewPath!!
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clickable { showRetakeConfirmDialog = true }
-                            ) {
-                                val painter = rememberAsyncImagePainter(
-                                    model = ImageRequest.Builder(context)
-                                        .data(File(previewPath))
-                                        .crossfade(true)
-                                        .build()
-                                )
-                                Image(
-                                    painter = painter,
-                                    contentDescription = "已拍摄照片，点击重拍",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color.Transparent)
-                                        .padding(4.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(
-                                                Color.Transparent,
-                                                RoundedCornerShape(4.dp)
-                                            )
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .background(
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                                                RoundedCornerShape(bottomEnd = 8.dp, topStart = 4.dp)
-                                            )
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text(
-                                                text = "✓ 已拍摄",
-                                                color = MaterialTheme.colorScheme.onPrimary,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text(
-                                                text = viewModel.currentAngleLabel,
-                                                color = MaterialTheme.colorScheme.onPrimary,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .padding(bottom = 8.dp)
-                                            .background(
-                                                Color.Black.copy(alpha = 0.6f),
-                                                RoundedCornerShape(6.dp)
-                                            )
-                                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = "点击重拍",
-                                            color = Color.White,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
                         Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
@@ -733,13 +679,47 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(4.dp))
         }
     }
+    // BackHandler for analysis page - must be OUTSIDE AnimatedContent so it
+    // registers LAST and takes priority over the gallery BackHandler.
+    // Only enabled when analysis is showing.
+    BackHandler(enabled = showAnalysis) {
+        showAnalysis = false
+        // showPhotoGallery stays true - we stay on the gallery page
+    }
+
+    // Analysis page displayed as a full-screen overlay.
     if (showAnalysis) {
-        BackHandler { showAnalysis = false }
-        AnalysisScreen(
-            region = analysisRegion,
-            date = analysisDate,
-            onBack = { showAnalysis = false }
-        )
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Scrim overlay (visual only - back arrow closes the analysis page)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f))
+            )
+
+            // Analysis content panel
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .padding(top = 48.dp),
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp,
+                shadowElevation = 8.dp
+            ) {
+                AnalysisScreen(
+                    region = analysisRegion,
+                    date = analysisDate,
+                    mapView = analysisMapView,
+                    sharedAMap = analysisAMap.value,
+                    onBack = {
+                        showAnalysis = false
+                        showPhotoGallery = true
+                    }
+                )
+            }
+        }
     }
     if (showFieldEditDialog) {
         FieldEditDialog(
@@ -1562,7 +1542,7 @@ fun CompactBottomBar(
                 onClick = onOpenGallery,
                 modifier = Modifier.size(32.dp)
             ) {
-                Icon(Icons.Default.Collections, contentDescription = "照片集", tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.Storage, contentDescription = "数据库", tint = MaterialTheme.colorScheme.primary)
             }
         }
     }

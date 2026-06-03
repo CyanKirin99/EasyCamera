@@ -1,7 +1,5 @@
 package com.example.easycamera.ui.analysis
 
-import android.os.Bundle
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,18 +18,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +39,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.TextureMapView
+import com.amap.api.maps.model.BitmapDescriptor
 import com.amap.api.maps.model.BitmapDescriptorFactory
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.LatLngBounds
@@ -50,11 +51,14 @@ fun AnalysisScreen(
     region: String,
     date: String,
     onBack: () -> Unit,
+    mapView: com.amap.api.maps.TextureMapView? = null,
+    sharedAMap: AMap? = null,
     viewModel: AnalysisViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    BackHandler(onBack = onBack)
+    // Back press is handled at the top level in MainActivity via BackHandler(enabled = showAnalysis)
+    // to prevent the handler from being removed during callback and causing app exit.
 
     LaunchedEffect(region, date) {
         viewModel.loadProject(region, date)
@@ -63,19 +67,37 @@ fun AnalysisScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(12.dp)
     ) {
-        Text(
-            text = "数据分析",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "$region / $date",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        // Header row with back arrow and title
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "返回",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "数据分析",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "$region / $date",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -87,7 +109,7 @@ fun AnalysisScreen(
                 CircularProgressIndicator()
             }
         } else {
-            MapSection(uiState.photoLocations)
+            MapSection(uiState.photoLocations, mapView, sharedAMap)
             Spacer(modifier = Modifier.height(12.dp))
             StatsSection(uiState.projectStats)
             Spacer(modifier = Modifier.height(12.dp))
@@ -99,7 +121,11 @@ fun AnalysisScreen(
 }
 
 @Composable
-private fun MapSection(locations: List<com.example.easycamera.data.model.PhotoLocation>) {
+private fun MapSection(
+    locations: List<com.example.easycamera.data.model.PhotoLocation>,
+    mapView: TextureMapView?,
+    sharedAMap: AMap?
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -135,7 +161,8 @@ private fun MapSection(locations: List<com.example.easycamera.data.model.PhotoLo
                         .height(280.dp)
                         .clip(RoundedCornerShape(8.dp))
                 ) {
-                    AMapMapView(locations)
+                    // Limit markers to prevent OOM on map rendering
+                    AMapMapView(locations.take(500), mapView, sharedAMap)
                 }
             }
         }
@@ -143,22 +170,30 @@ private fun MapSection(locations: List<com.example.easycamera.data.model.PhotoLo
 }
 
 @Composable
-private fun AMapMapView(locations: List<com.example.easycamera.data.model.PhotoLocation>) {
-    val context = LocalContext.current
-    val mapView = remember { androidx.compose.runtime.mutableStateOf<TextureMapView?>(null) }
+private fun AMapMapView(
+    locations: List<com.example.easycamera.data.model.PhotoLocation>,
+    mapView: TextureMapView?,
+    sharedAMap: AMap?
+) {
+    val aMap = sharedAMap
+    val view = mapView
 
-    val aMapState = remember { androidx.compose.runtime.mutableStateOf<AMap?>(null) }
-    val bundleState = remember { Bundle() }
+    if (aMap == null || view == null) return
 
-    DisposableEffect(Unit) {
-        onDispose {
-            mapView.value?.onDestroy()
+    // 复用 MainActivity 创建的 TextureMapView，不再创建新的
+    AndroidView(
+        factory = { view },
+        modifier = Modifier.fillMaxSize(),
+        onRelease = {
+            // 不销毁 — 生命周期由 MainActivity 管理
         }
-    }
+    )
 
     LaunchedEffect(locations) {
-        val aMap = aMapState.value ?: return@LaunchedEffect
         if (locations.isEmpty()) return@LaunchedEffect
+
+        // 卫星地图更适合农业场景
+        aMap.mapType = AMap.MAP_TYPE_SATELLITE
 
         aMap.clear()
 
@@ -204,18 +239,31 @@ private fun AMapMapView(locations: List<com.example.easycamera.data.model.PhotoL
 
         aMap.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, 60))
     }
+}
 
-    AndroidView(
-        factory = { ctx ->
-            TextureMapView(ctx).apply {
-                mapView.value = this
-                onCreate(bundleState)
-                aMapState.value = map
-                onResume()
-            }
-        },
-        modifier = Modifier.fillMaxSize()
+private fun createFieldCodeBitmap(fieldCode: String): BitmapDescriptor {
+    val text = "田${fieldCode}"
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        textSize = 42f
+        isFakeBoldText = true
+    }
+    val bgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(200, 255, 255, 255)
+    }
+    val bounds = android.graphics.Rect()
+    paint.getTextBounds(text, 0, text.length, bounds)
+    val padding = 12
+    val width = bounds.width() + padding * 2
+    val height = bounds.height() + padding * 2
+    val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    canvas.drawRoundRect(
+        0f, 0f, width.toFloat(), height.toFloat(),
+        10f, 10f, bgPaint
     )
+    canvas.drawText(text, padding.toFloat(), (height - padding + bounds.height() / 2).toFloat(), paint)
+    return BitmapDescriptorFactory.fromBitmap(bitmap)
 }
 
 @Composable
@@ -417,29 +465,4 @@ private fun TimeSeriesSection(timeSeries: com.example.easycamera.data.model.Regi
             )
         }
     }
-}
-
-private fun createFieldCodeBitmap(fieldCode: String): com.amap.api.maps.model.BitmapDescriptor {
-    val text = "田${fieldCode}"
-    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.BLACK
-        textSize = 42f
-        isFakeBoldText = true
-    }
-    val bgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(200, 255, 255, 255)
-    }
-    val bounds = android.graphics.Rect()
-    paint.getTextBounds(text, 0, text.length, bounds)
-    val padding = 12
-    val width = bounds.width() + padding * 2
-    val height = bounds.height() + padding * 2
-    val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(bitmap)
-    canvas.drawRoundRect(
-        0f, 0f, width.toFloat(), height.toFloat(),
-        10f, 10f, bgPaint
-    )
-    canvas.drawText(text, padding.toFloat(), (height - padding + bounds.height() / 2).toFloat(), paint)
-    return com.amap.api.maps.model.BitmapDescriptorFactory.fromBitmap(bitmap)
 }

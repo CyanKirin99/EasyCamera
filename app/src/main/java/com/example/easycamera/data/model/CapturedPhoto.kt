@@ -10,5 +10,7 @@ data class CapturedPhoto(
     val latitude: String,
     val filename: String,
     val filePath: String,
-    val lastModified: Long
+    val lastModified: Long,
+    val bbch: String = "",
+    val plantHeight: String = ""
 )
