@@ -19,6 +19,10 @@ class LocationProvider(private val context: Context) {
         return ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
     }
 
@@ -74,7 +78,11 @@ class LocationProvider(private val context: Context) {
                         val errCode = aMapLocation?.errorCode ?: -1
                         val errInfo = aMapLocation?.errorInfo ?: "未知错误"
                         val sha1 = getCurrentSha1()
-                        val errorMsg = "高德定位错误($errCode): $errInfo"
+                        val errorMsg = if (errCode == 12) {
+                            "高德定位错误($errCode): 缺少定位权限，请检查：1.系统设置中已授予精确位置权限 2.定位服务已开启"
+                        } else {
+                            "高德定位错误($errCode): $errInfo"
+                        }
                         android.util.Log.w("LocationProvider", errorMsg)
                         android.util.Log.w("LocationProvider", "SHA1=$sha1 包名=${context.packageName}")
                         onStatus(errorMsg)
