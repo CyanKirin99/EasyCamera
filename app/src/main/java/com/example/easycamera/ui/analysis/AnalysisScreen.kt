@@ -68,6 +68,7 @@ fun AnalysisScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(12.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         // Header row with back arrow and title
         Row(
