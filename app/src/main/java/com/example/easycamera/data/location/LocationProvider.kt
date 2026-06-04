@@ -3,12 +3,14 @@ package com.example.easycamera.data.location
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import androidx.core.content.ContextCompat
 import com.amap.api.location.AMapLocation
 import com.amap.api.location.AMapLocationClient
 import com.amap.api.location.AMapLocationClientOption
 import com.example.easycamera.data.model.LocationInfo
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -19,10 +21,6 @@ class LocationProvider(private val context: Context) {
         return ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
     }
 
@@ -55,54 +53,118 @@ class LocationProvider(private val context: Context) {
             return null
         }
 
-        return try {
-            suspendCancellableCoroutine { cont ->
-                val client = AMapLocationClient(context)
-                val option = AMapLocationClientOption().apply {
-                    locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
-                    isOnceLocation = true
-                    isNeedAddress = false
-                }
-                client.setLocationOption(option)
-                client.setLocationListener { aMapLocation: AMapLocation? ->
-                    if (aMapLocation != null && aMapLocation.errorCode == 0) {
-                        cont.resume(
-                            LocationInfo(
-                                longitude = aMapLocation.longitude,
-                                latitude = aMapLocation.latitude,
-                                accuracy = aMapLocation.accuracy,
-                                timestamp = aMapLocation.time
-                            )
+        // 1. Try AMap location first
+        val amapResult = try {
+            getAmapLocation()
+        } catch (e: Exception) {
+            android.util.Log.e("LocationProvider", "AMap定位异常", e)
+            null
+        }
+
+        if (amapResult != null) {
+            return amapResult
+        }
+
+        // 2. If AMap failed, try Android LocationManager as fallback
+        android.util.Log.w("LocationProvider", "AMap定位失败，尝试Android原生定位")
+        val systemResult = getSystemLocation()
+        if (systemResult != null) {
+            onStatus("定位(系统)已获取")
+            return systemResult
+        }
+
+        onStatus("所有定位方式均失败")
+        return null
+    }
+
+    private suspend fun getAmapLocation(): LocationInfo? {
+        return suspendCancellableCoroutine { cont ->
+            val client = AMapLocationClient(context)
+            val option = AMapLocationClientOption().apply {
+                locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
+                isOnceLocation = true
+                isNeedAddress = false
+            }
+            client.setLocationOption(option)
+            client.setLocationListener { aMapLocation: AMapLocation? ->
+                if (aMapLocation != null && aMapLocation.errorCode == 0) {
+                    cont.resume(
+                        LocationInfo(
+                            longitude = aMapLocation.longitude,
+                            latitude = aMapLocation.latitude,
+                            accuracy = aMapLocation.accuracy,
+                            timestamp = aMapLocation.time
                         )
-                    } else {
-                        val errCode = aMapLocation?.errorCode ?: -1
-                        val errInfo = aMapLocation?.errorInfo ?: "未知错误"
-                        val sha1 = getCurrentSha1()
-                        val errorMsg = if (errCode == 12) {
-                            "高德定位错误($errCode): 缺少定位权限，请检查：1.系统设置中已授予精确位置权限 2.定位服务已开启"
-                        } else {
-                            "高德定位错误($errCode): $errInfo"
-                        }
-                        android.util.Log.w("LocationProvider", errorMsg)
-                        android.util.Log.w("LocationProvider", "SHA1=$sha1 包名=${context.packageName}")
-                        onStatus(errorMsg)
-                        cont.resume(null)
-                    }
-                    client.stopLocation()
-                    client.onDestroy()
+                    )
+                } else {
+                    val errCode = aMapLocation?.errorCode ?: -1
+                    val errInfo = aMapLocation?.errorInfo ?: "未知错误"
+                    val sha1 = getCurrentSha1()
+                    android.util.Log.w("LocationProvider",
+                        "高德定位失败($errCode): $errInfo  SHA1=$sha1")
+                    cont.resume(null) // resume null to trigger fallback
                 }
-                client.startLocation()
+                client.stopLocation()
+                client.onDestroy()
+            }
+            client.startLocation()
+
+            cont.invokeOnCancellation {
+                client.stopLocation()
+                client.onDestroy()
+            }
+        }
+    }
+
+    private suspend fun getSystemLocation(): LocationInfo? {
+        return withTimeoutOrNull(10000L) {
+            suspendCancellableCoroutine { cont ->
+                val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+                // Try last known location first (within 30 seconds)
+                val lastLocation = listOfNotNull(
+                    runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull(),
+                    runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull()
+                ).maxByOrNull { it.time }
+
+                if (lastLocation != null && System.currentTimeMillis() - lastLocation.time < 30_000) {
+                    cont.resume(
+                        LocationInfo(
+                            longitude = lastLocation.longitude,
+                            latitude = lastLocation.latitude,
+                            accuracy = lastLocation.accuracy.toFloat(),
+                            timestamp = lastLocation.time
+                        )
+                    )
+                    return@suspendCancellableCoroutine
+                }
+
+                // Request fresh location
+                var responded = false
+                val listener = object : android.location.LocationListener {
+                    override fun onLocationChanged(location: android.location.Location) {
+                        if (!responded) {
+                            responded = true
+                            cont.resume(
+                                LocationInfo(
+                                    longitude = location.longitude,
+                                    latitude = location.latitude,
+                                    accuracy = location.accuracy.toFloat(),
+                                    timestamp = location.time
+                                )
+                            )
+                            try { locationManager.removeUpdates(this) } catch (_: Exception) {}
+                        }
+                    }
+                }
+
+                try { locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, listener) } catch (_: Exception) {}
+                try { locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0L, 0f, listener) } catch (_: Exception) {}
 
                 cont.invokeOnCancellation {
-                    client.stopLocation()
-                    client.onDestroy()
+                    try { locationManager.removeUpdates(listener) } catch (_: Exception) {}
                 }
             }
-        } catch (e: Exception) {
-            val sha1 = getCurrentSha1()
-            android.util.Log.e("LocationProvider", "定位异常: SHA1=$sha1, 包名=${context.packageName}", e)
-            onStatus("定位抛异常: ${e.message}")
-            null
         }
     }
 }

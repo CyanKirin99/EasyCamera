@@ -263,15 +263,16 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
     val analysisAMap = remember { mutableStateOf<com.amap.api.maps.AMap?>(null) }
     val analysisMapBundle = remember { Bundle() }
 
-    // 地图只初始化一次
-    LaunchedEffect(Unit) {
-        analysisMapView.onCreate(analysisMapBundle)
-        analysisAMap.value = analysisMapView.map
-    }
+    val analysisMapInitialized = remember { mutableStateOf(false) }
 
-    // 进入/退出分析页面时暂停/恢复地图
+    // 进入分析页面时才初始化地图，避免在定位权限授予前提前触发AMap SDK内部缓存
     LaunchedEffect(showAnalysis) {
         if (showAnalysis) {
+            if (!analysisMapInitialized.value) {
+                analysisMapView.onCreate(analysisMapBundle)
+                analysisAMap.value = analysisMapView.map
+                analysisMapInitialized.value = true
+            }
             analysisMapView.onResume()
         } else {
             try { analysisMapView.onPause() } catch (_: Throwable) {}
