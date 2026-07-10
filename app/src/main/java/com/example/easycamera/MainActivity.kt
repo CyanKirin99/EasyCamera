@@ -1008,13 +1008,24 @@ fun CompactInfoBar(
     onOperatorSelected: (String) -> Unit,
     onRefreshLocation: () -> Unit
 ) {
-    val regionOptions = listOf("JL", "XT", "JS")
-    val operatorOptions = listOf("黄添", "史俊尧", "苏辰晔", "王宇杰", "张浩然")
     val locationText by locationStatus.collectAsState()
     val context = LocalContext.current
 
+    // 自定义选项：从 SharedPreferences 读取
+    val prefs = remember { context.getSharedPreferences("custom_options", Context.MODE_PRIVATE) }
+    var customRegions by remember { mutableStateOf(prefs.getStringSet("regions", emptySet())?.toSet() ?: emptySet()) }
+    var customOperators by remember { mutableStateOf(prefs.getStringSet("operators", emptySet())?.toSet() ?: emptySet()) }
+
+    val defaultRegions = listOf("JL", "XT", "JS")
+    val defaultOperators = listOf("黄添", "史俊尧", "苏辰晔", "王宇杰", "张浩然")
+    val allRegions = remember(customRegions) { defaultRegions + customRegions.sorted() }
+    val allOperators = remember(customOperators) { defaultOperators + customOperators.sorted() }
+
     var regionExpanded by remember { mutableStateOf(false) }
     var operatorExpanded by remember { mutableStateOf(false) }
+    var showAddRegionDialog by remember { mutableStateOf(false) }
+    var showAddOperatorDialog by remember { mutableStateOf(false) }
+    var addCustomText by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1044,7 +1055,7 @@ fun CompactInfoBar(
                     onDismissRequest = { regionExpanded = false },
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    regionOptions.forEach { option ->
+                    allRegions.forEach { option ->
                         DropdownMenuItem(
                             text = { Text(option) },
                             onClick = {
@@ -1053,6 +1064,15 @@ fun CompactInfoBar(
                             }
                         )
                     }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("+ 添加自定义...", color = MaterialTheme.colorScheme.primary) },
+                        onClick = {
+                            regionExpanded = false
+                            addCustomText = ""
+                            showAddRegionDialog = true
+                        }
+                    )
                 }
             }
 
@@ -1146,7 +1166,7 @@ fun CompactInfoBar(
                     onDismissRequest = { operatorExpanded = false },
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    operatorOptions.forEach { option ->
+                    allOperators.forEach { option ->
                         DropdownMenuItem(
                             text = { Text(option) },
                             onClick = {
@@ -1155,6 +1175,15 @@ fun CompactInfoBar(
                             }
                         )
                     }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("+ 添加自定义...", color = MaterialTheme.colorScheme.primary) },
+                        onClick = {
+                            operatorExpanded = false
+                            addCustomText = ""
+                            showAddOperatorDialog = true
+                        }
+                    )
                 }
             }
         }
@@ -1185,6 +1214,80 @@ fun CompactInfoBar(
                 )
             }
         }
+    }
+
+    // 添加自定义地区对话框
+    if (showAddRegionDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddRegionDialog = false; addCustomText = "" },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("添加自定义地区") },
+            text = {
+                OutlinedTextField(
+                    value = addCustomText,
+                    onValueChange = { addCustomText = it },
+                    label = { Text("输入地区名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val text = addCustomText.trim()
+                        if (text.isNotBlank()) {
+                            val newSet = customRegions + text
+                            prefs.edit().putStringSet("regions", newSet).apply()
+                            customRegions = newSet
+                            onRegionSelected(text)
+                            addCustomText = ""
+                            showAddRegionDialog = false
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddRegionDialog = false; addCustomText = "" }) { Text("取消") }
+            }
+        )
+    }
+
+    // 添加自定义人员对话框
+    if (showAddOperatorDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddOperatorDialog = false; addCustomText = "" },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("添加自定义人员") },
+            text = {
+                OutlinedTextField(
+                    value = addCustomText,
+                    onValueChange = { addCustomText = it },
+                    label = { Text("输入人员名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val text = addCustomText.trim()
+                        if (text.isNotBlank()) {
+                            val newSet = customOperators + text
+                            prefs.edit().putStringSet("operators", newSet).apply()
+                            customOperators = newSet
+                            onOperatorSelected(text)
+                            addCustomText = ""
+                            showAddOperatorDialog = false
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddOperatorDialog = false; addCustomText = "" }) { Text("取消") }
+            }
+        )
     }
 }
 
@@ -1691,8 +1794,15 @@ fun MissingFieldsDialog(
     onUpdateOperator: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val regionOptions = listOf("JL", "XT", "JS")
-    val operatorOptions = listOf("黄添", "史俊尧", "苏辰晔", "王宇杰", "张浩然")
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("custom_options", Context.MODE_PRIVATE) }
+    var customRegions by remember { mutableStateOf(prefs.getStringSet("regions", emptySet())?.toSet() ?: emptySet()) }
+    var customOperators by remember { mutableStateOf(prefs.getStringSet("operators", emptySet())?.toSet() ?: emptySet()) }
+
+    val defaultRegions = listOf("JL", "XT", "JS")
+    val defaultOperators = listOf("黄添", "史俊尧", "苏辰晔", "王宇杰", "张浩然")
+    val allRegions = remember(customRegions) { defaultRegions + customRegions.sorted() }
+    val allOperators = remember(customOperators) { defaultOperators + customOperators.sorted() }
 
     val missingRegion = sessionConfig.region.isBlank()
     val missingOperator = sessionConfig.operator.isBlank()
@@ -1718,9 +1828,10 @@ fun MissingFieldsDialog(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            regionOptions.forEach { option ->
+                            allRegions.take(6).forEach { option ->
                                 FilterChip(
                                     selected = false,
                                     onClick = {
@@ -1733,6 +1844,14 @@ fun MissingFieldsDialog(
                                     shape = RoundedCornerShape(6.dp)
                                 )
                             }
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    onDismiss()
+                                },
+                                label = { Text("+ 添加", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary) },
+                                shape = RoundedCornerShape(6.dp)
+                            )
                         }
                     }
                 }
@@ -1746,10 +1865,11 @@ fun MissingFieldsDialog(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            operatorOptions.forEach { option ->
+                            allOperators.take(8).forEach { option ->
                                 FilterChip(
                                     selected = false,
                                     onClick = {
@@ -1762,6 +1882,14 @@ fun MissingFieldsDialog(
                                     shape = RoundedCornerShape(6.dp)
                                 )
                             }
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    onDismiss()
+                                },
+                                label = { Text("+ 添加", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary) },
+                                shape = RoundedCornerShape(6.dp)
+                            )
                         }
                     }
                 }

@@ -12,8 +12,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -911,7 +909,6 @@ fun PhotoGalleryScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProjectSelectorBar(
     candidateProjects: List<CaptureProject>,
@@ -955,12 +952,11 @@ fun ProjectSelectorBar(
         }
 
         if (candidateProjects.isNotEmpty()) {
-            FlowRow(
+            LazyRow(
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                candidateProjects.forEach { project ->
+                items(candidateProjects) { project ->
                     FilterChip(
                         selected = false,
                         onClick = { onProjectSelected(project) },
