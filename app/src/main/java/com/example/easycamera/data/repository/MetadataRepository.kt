@@ -8,6 +8,19 @@ import java.io.File
 
 class MetadataRepository(private val context: Context) {
 
+    /**
+     * Safely replaces a component in a filename by index, avoiding the replace-all bug.
+     * Filename format: {region}_{date}_{fieldCode}_{sampleCode}_{angleCode}_{longitude}_{latitude}.jpg
+     * @param filename the original filename
+     * @param index the 0-based index of the component to replace (2=fieldCode, 3=sampleCode)
+     * @param newValue the new value for that component
+     */
+    private fun replaceFilenameComponent(filename: String, index: Int, newValue: String): String {
+        val parts = filename.split("_")
+        if (index < 0 || index >= parts.size) return filename
+        return parts.toMutableList().apply { this[index] = newValue }.joinToString("_")
+    }
+
     companion object {
         val HEADERS = listOf(
             "region",
@@ -44,9 +57,9 @@ class MetadataRepository(private val context: Context) {
             val updatedData = allLines.drop(1).map { row ->
                 if (row.size >= 12 && row[0] == region && row[1] == date) {
                     if (row[2] == fieldCodeA) {
-                        val newFilename = row[9].replace("_${fieldCodeA}_", "_${fieldCodeB}_")
-                        val newRelPath = row[10].replace("_${fieldCodeA}_", "_${fieldCodeB}_")
-                        val newFilePath = row[11].replace("_${fieldCodeA}_", "_${fieldCodeB}_")
+                        val newFilename = replaceFilenameComponent(row[9], 2, fieldCodeB)
+                        val newRelPath = replaceFilenameComponent(row[10], 2, fieldCodeB)
+                        val newFilePath = replaceFilenameComponent(row[11], 2, fieldCodeB)
                         row.toMutableList().apply {
                             this[2] = fieldCodeB
                             this[9] = newFilename
@@ -54,9 +67,9 @@ class MetadataRepository(private val context: Context) {
                             this[11] = newFilePath
                         }
                     } else if (row[2] == fieldCodeB) {
-                        val newFilename = row[9].replace("_${fieldCodeB}_", "_${fieldCodeA}_")
-                        val newRelPath = row[10].replace("_${fieldCodeB}_", "_${fieldCodeA}_")
-                        val newFilePath = row[11].replace("_${fieldCodeB}_", "_${fieldCodeA}_")
+                        val newFilename = replaceFilenameComponent(row[9], 2, fieldCodeA)
+                        val newRelPath = replaceFilenameComponent(row[10], 2, fieldCodeA)
+                        val newFilePath = replaceFilenameComponent(row[11], 2, fieldCodeA)
                         row.toMutableList().apply {
                             this[2] = fieldCodeA
                             this[9] = newFilename
@@ -332,11 +345,11 @@ class MetadataRepository(private val context: Context) {
                     row[3] == sampleCode
                 ) {
                     val oldFilename = row[9]
-                    val newFilename = oldFilename.replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                    val newFilename = replaceFilenameComponent(oldFilename, 2, newFieldCode)
                     val oldRelPath = row[10]
-                    val newRelPath = oldRelPath.replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                    val newRelPath = replaceFilenameComponent(oldRelPath, 2, newFieldCode)
                     val oldFilePath = row[11]
-                    val newFilePath = oldFilePath.replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                    val newFilePath = replaceFilenameComponent(oldFilePath, 2, newFieldCode)
                     row.toMutableList().apply {
                         this[2] = newFieldCode
                         this[9] = newFilename
@@ -380,11 +393,11 @@ class MetadataRepository(private val context: Context) {
                     row[3] == oldSampleCode
                 ) {
                     val oldFilename = row[9]
-                    val newFilename = oldFilename.replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                    val newFilename = replaceFilenameComponent(oldFilename, 3, newSampleCode)
                     val oldRelPath = row[10]
-                    val newRelPath = oldRelPath.replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                    val newRelPath = replaceFilenameComponent(oldRelPath, 3, newSampleCode)
                     val oldFilePath = row[11]
-                    val newFilePath = oldFilePath.replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                    val newFilePath = replaceFilenameComponent(oldFilePath, 3, newSampleCode)
                     row.toMutableList().apply {
                         this[3] = newSampleCode
                         this[9] = newFilename
@@ -423,9 +436,9 @@ class MetadataRepository(private val context: Context) {
             val updatedData = allLines.drop(1).map { row ->
                 if (row.size >= 12 && row[0] == region && row[1] == date && row[2] == fieldCode) {
                     if (row[3] == sampleCodeA) {
-                        val newFilename = row[9].replace("_${sampleCodeA}_", "_${sampleCodeB}_")
-                        val newRelPath = row[10].replace("_${sampleCodeA}_", "_${sampleCodeB}_")
-                        val newFilePath = row[11].replace("_${sampleCodeA}_", "_${sampleCodeB}_")
+                        val newFilename = replaceFilenameComponent(row[9], 3, sampleCodeB)
+                        val newRelPath = replaceFilenameComponent(row[10], 3, sampleCodeB)
+                        val newFilePath = replaceFilenameComponent(row[11], 3, sampleCodeB)
                         row.toMutableList().apply {
                             this[3] = sampleCodeB
                             this[9] = newFilename
@@ -433,9 +446,9 @@ class MetadataRepository(private val context: Context) {
                             this[11] = newFilePath
                         }
                     } else if (row[3] == sampleCodeB) {
-                        val newFilename = row[9].replace("_${sampleCodeB}_", "_${sampleCodeA}_")
-                        val newRelPath = row[10].replace("_${sampleCodeB}_", "_${sampleCodeA}_")
-                        val newFilePath = row[11].replace("_${sampleCodeB}_", "_${sampleCodeA}_")
+                        val newFilename = replaceFilenameComponent(row[9], 3, sampleCodeA)
+                        val newRelPath = replaceFilenameComponent(row[10], 3, sampleCodeA)
+                        val newFilePath = replaceFilenameComponent(row[11], 3, sampleCodeA)
                         row.toMutableList().apply {
                             this[3] = sampleCodeA
                             this[9] = newFilename
@@ -478,15 +491,12 @@ class MetadataRepository(private val context: Context) {
             val updatedData = allLines.drop(1).map { row ->
                 if (row.size >= 12 && row[0] == region && row[1] == date) {
                     if (row[2] == oldFieldCode && row[3] == oldSampleCode) {
-                        val newFilename = row[9]
-                            .replace("_${oldFieldCode}_", "_${newFieldCode}_")
-                            .replace("_${oldSampleCode}_", "_${newSampleCode}_")
-                        val newRelPath = row[10]
-                            .replace("_${oldFieldCode}_", "_${newFieldCode}_")
-                            .replace("_${oldSampleCode}_", "_${newSampleCode}_")
-                        val newFilePath = row[11]
-                            .replace("_${oldFieldCode}_", "_${newFieldCode}_")
-                            .replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                        val newFilename = replaceFilenameComponent(
+                            replaceFilenameComponent(row[9], 2, newFieldCode), 3, newSampleCode)
+                        val newRelPath = replaceFilenameComponent(
+                            replaceFilenameComponent(row[10], 2, newFieldCode), 3, newSampleCode)
+                        val newFilePath = replaceFilenameComponent(
+                            replaceFilenameComponent(row[11], 2, newFieldCode), 3, newSampleCode)
                         row.toMutableList().apply {
                             this[2] = newFieldCode
                             this[3] = newSampleCode
@@ -495,15 +505,12 @@ class MetadataRepository(private val context: Context) {
                             this[11] = newFilePath
                         }
                     } else if (row[2] == newFieldCode && row[3] == newSampleCode) {
-                        val newFilename = row[9]
-                            .replace("_${newFieldCode}_", "_${oldFieldCode}_")
-                            .replace("_${newSampleCode}_", "_${oldSampleCode}_")
-                        val newRelPath = row[10]
-                            .replace("_${newFieldCode}_", "_${oldFieldCode}_")
-                            .replace("_${newSampleCode}_", "_${oldSampleCode}_")
-                        val newFilePath = row[11]
-                            .replace("_${newFieldCode}_", "_${oldFieldCode}_")
-                            .replace("_${newSampleCode}_", "_${oldSampleCode}_")
+                        val newFilename = replaceFilenameComponent(
+                            replaceFilenameComponent(row[9], 2, oldFieldCode), 3, oldSampleCode)
+                        val newRelPath = replaceFilenameComponent(
+                            replaceFilenameComponent(row[10], 2, oldFieldCode), 3, oldSampleCode)
+                        val newFilePath = replaceFilenameComponent(
+                            replaceFilenameComponent(row[11], 2, oldFieldCode), 3, oldSampleCode)
                         row.toMutableList().apply {
                             this[2] = oldFieldCode
                             this[3] = oldSampleCode

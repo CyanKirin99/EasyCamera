@@ -72,13 +72,17 @@ class PhotoGalleryRepository(private val context: Context) {
 
             // 4. Restore fieldCodeA's backup with fieldCodeB naming
             for (file in filesA) {
-                val newName = file.name.replace("_${fieldCodeA}_", "_${fieldCodeB}_")
+                val parts = file.name.split("_").toMutableList()
+                if (parts.size >= 3) parts[2] = fieldCodeB
+                val newName = parts.joinToString("_")
                 File(tempDir, file.name).renameTo(File(imagesDir, newName))
             }
 
             // 5. Restore fieldCodeB's backup with fieldCodeA naming
             for (file in filesB) {
-                val newName = file.name.replace("_${fieldCodeB}_", "_${fieldCodeA}_")
+                val parts = file.name.split("_").toMutableList()
+                if (parts.size >= 3) parts[2] = fieldCodeA
+                val newName = parts.joinToString("_")
                 File(tempDir, file.name).renameTo(File(imagesDir, newName))
             }
 
@@ -197,7 +201,7 @@ class PhotoGalleryRepository(private val context: Context) {
         val file = File(photo.filePath)
         if (!file.exists()) return false
         val parentDir = file.parentFile ?: return false
-        val newFileName = photo.filename.replace("_${photo.sampleCode}_", "_${newSampleCode}_")
+        val newFileName = "${photo.region}_${photo.date}_${photo.fieldCode}_${newSampleCode}_${photo.angleCode}_${photo.longitude}_${photo.latitude}.jpg"
         val newFile = File(parentDir, newFileName)
         return file.renameTo(newFile)
     }
@@ -245,11 +249,15 @@ class PhotoGalleryRepository(private val context: Context) {
             for (file in filesB) file.delete()
 
             for (file in filesA) {
-                val newName = file.name.replace("_${sampleCodeA}_", "_${sampleCodeB}_")
+                val parts = file.name.split("_").toMutableList()
+                if (parts.size >= 4) parts[3] = sampleCodeB
+                val newName = parts.joinToString("_")
                 File(tempDir, file.name).renameTo(File(imagesDir, newName))
             }
             for (file in filesB) {
-                val newName = file.name.replace("_${sampleCodeB}_", "_${sampleCodeA}_")
+                val parts = file.name.split("_").toMutableList()
+                if (parts.size >= 4) parts[3] = sampleCodeA
+                val newName = parts.joinToString("_")
                 File(tempDir, file.name).renameTo(File(imagesDir, newName))
             }
 
@@ -306,15 +314,21 @@ class PhotoGalleryRepository(private val context: Context) {
             for (file in filesB) file.delete()
 
             for (file in filesA) {
-                val newName = file.name
-                    .replace("_${oldFieldCode}_", "_${newFieldCode}_")
-                    .replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                val parts = file.name.split("_").toMutableList()
+                if (parts.size >= 4) {
+                    parts[2] = newFieldCode
+                    parts[3] = newSampleCode
+                }
+                val newName = parts.joinToString("_")
                 File(tempDir, file.name).renameTo(File(imagesDir, newName))
             }
             for (file in filesB) {
-                val newName = file.name
-                    .replace("_${newFieldCode}_", "_${oldFieldCode}_")
-                    .replace("_${newSampleCode}_", "_${oldSampleCode}_")
+                val parts = file.name.split("_").toMutableList()
+                if (parts.size >= 4) {
+                    parts[2] = oldFieldCode
+                    parts[3] = oldSampleCode
+                }
+                val newName = parts.joinToString("_")
                 File(tempDir, file.name).renameTo(File(imagesDir, newName))
             }
 

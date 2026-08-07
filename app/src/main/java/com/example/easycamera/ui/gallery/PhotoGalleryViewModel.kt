@@ -603,14 +603,18 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
 
                 var allOk = true
                 val repo = PhotoGalleryRepository(getApplication())
-                // First update field code, then sample code
+                // Rename files by splitting and replacing specific positions
                 for (photo in photosToModify) {
                     val file = File(photo.filePath)
                     if (!file.exists()) { allOk = false; continue }
                     val parentDir = file.parentFile ?: continue
-                    val newFileName = photo.filename
-                        .replace("_${oldFieldCode}_", "_${newFieldCode}_")
-                        .replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                    val parts = photo.filename.split("_").toMutableList()
+                    // Format: region_date_fieldCode_sampleCode_angleCode_lon_lat.jpg
+                    if (parts.size >= 4) {
+                        parts[2] = newFieldCode
+                        parts[3] = newSampleCode
+                    }
+                    val newFileName = parts.joinToString("_")
                     val newFile = File(parentDir, newFileName)
                     if (!file.renameTo(newFile)) { allOk = false }
                 }
