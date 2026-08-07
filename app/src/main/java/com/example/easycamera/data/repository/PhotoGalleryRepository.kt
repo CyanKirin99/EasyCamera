@@ -264,6 +264,71 @@ class PhotoGalleryRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Swaps all photos of (oldFieldCode, oldSampleCode) with (newFieldCode, newSampleCode).
+     * Uses copy-to-backup strategy for safety, same as other swap methods.
+     */
+    fun swapFieldSampleCode(
+        project: CaptureProject,
+        oldFieldCode: String,
+        oldSampleCode: String,
+        newFieldCode: String,
+        newSampleCode: String
+    ): Boolean {
+        val imagesDir = File(project.imageDirPath)
+        if (!imagesDir.exists()) return false
+
+        val prefixA = "${project.region}_${project.date}_${oldFieldCode}_${oldSampleCode}_"
+        val prefixB = "${project.region}_${project.date}_${newFieldCode}_${newSampleCode}_"
+
+        val filesA = imagesDir.listFiles()?.filter { file ->
+            file.name.startsWith(prefixA) &&
+                (file.name.endsWith(".jpg", ignoreCase = true) ||
+                    file.name.endsWith(".jpeg", ignoreCase = true))
+        } ?: emptyList()
+
+        val filesB = imagesDir.listFiles()?.filter { file ->
+            file.name.startsWith(prefixB) &&
+                (file.name.endsWith(".jpg", ignoreCase = true) ||
+                    file.name.endsWith(".jpeg", ignoreCase = true))
+        } ?: emptyList()
+
+        if (filesA.isEmpty() && filesB.isEmpty()) return false
+
+        val tempDir = File(imagesDir.parentFile, "._swap_backup_${System.currentTimeMillis()}")
+        if (!tempDir.mkdirs()) return false
+
+        try {
+            for (file in filesA) file.copyTo(File(tempDir, file.name), overwrite = true)
+            for (file in filesB) file.copyTo(File(tempDir, file.name), overwrite = true)
+
+            for (file in filesA) file.delete()
+            for (file in filesB) file.delete()
+
+            for (file in filesA) {
+                val newName = file.name
+                    .replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                    .replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                File(tempDir, file.name).renameTo(File(imagesDir, newName))
+            }
+            for (file in filesB) {
+                val newName = file.name
+                    .replace("_${newFieldCode}_", "_${oldFieldCode}_")
+                    .replace("_${newSampleCode}_", "_${oldSampleCode}_")
+                File(tempDir, file.name).renameTo(File(imagesDir, newName))
+            }
+
+            tempDir.deleteRecursively()
+            return true
+        } catch (e: Exception) {
+            tempDir.listFiles()?.forEach { backup ->
+                backup.renameTo(File(imagesDir, backup.name))
+            }
+            tempDir.deleteRecursively()
+            return false
+        }
+    }
+
     fun deleteProject(project: CaptureProject): Boolean {
         val parts = project.projectName.split("_")
         if (parts.size < 2) return false

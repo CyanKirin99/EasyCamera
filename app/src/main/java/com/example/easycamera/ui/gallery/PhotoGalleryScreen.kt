@@ -166,14 +166,15 @@ fun PhotoGalleryScreen(
     var showForceOverwriteConfirmDialog by remember { mutableStateOf(false) }
     var showCsvViewer by remember { mutableStateOf(false) }
 
-    // Sample code editing state
+    // Sample code editing state (also supports field code change)
     var showSampleCodeEditDialog by remember { mutableStateOf(false) }
     var editingSampleCodeFieldCode by remember { mutableStateOf("") }
     var editingSampleCodeOldCode by remember { mutableStateOf("") }
-    var sampleCodeEditNewValue by remember { mutableStateOf("") }
+    var sampleCodeEditNewFieldCode by remember { mutableStateOf("") }
+    var sampleCodeEditNewSampleCode by remember { mutableStateOf("") }
     var sampleCodeEditError by remember { mutableStateOf<String?>(null) }
     var showOverwriteSampleConfirm by remember { mutableStateOf(false) }
-    var pendingNewSampleCode by remember { mutableStateOf("") }
+    var pendingNewFieldCodeSample by remember { mutableStateOf<Pair<String, String>>(Pair("", "")) }
     var showSampleSwapConfirmDialog by remember { mutableStateOf(false) }
     var showSampleForceOverwriteConfirmDialog by remember { mutableStateOf(false) }
 
@@ -554,7 +555,8 @@ fun PhotoGalleryScreen(
                                     onEditSampleCode = { fieldCode, sampleCode ->
                                         editingSampleCodeFieldCode = fieldCode
                                         editingSampleCodeOldCode = sampleCode
-                                        sampleCodeEditNewValue = sampleCode
+                                        sampleCodeEditNewFieldCode = fieldCode
+                                        sampleCodeEditNewSampleCode = sampleCode
                                         sampleCodeEditError = null
                                         showSampleCodeEditDialog = true
                                     },
@@ -943,7 +945,7 @@ fun PhotoGalleryScreen(
         )
     }
 
-    // --- Sample Code Edit Dialog ---
+    // --- Sample Code Edit Dialog (also supports field code change) ---
     if (showSampleCodeEditDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -951,15 +953,64 @@ fun PhotoGalleryScreen(
                 sampleCodeEditError = null
             },
             shape = RoundedCornerShape(12.dp),
-            title = { Text("修改样本编号") },
+            title = { Text("修改田块/样本编号") },
             text = {
                 Column {
                     Text(
-                        text = "田块 ${editingSampleCodeFieldCode}  样本编号：${editingSampleCodeOldCode}",
+                        text = "当前：田块 ${editingSampleCodeFieldCode}  样本 ${editingSampleCodeOldCode}",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(12.dp))
+                    // Field code selector
+                    Text(
+                        text = "目标田块编号：",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val current = sampleCodeEditNewFieldCode.toIntOrNull() ?: 1
+                                if (current > 1) {
+                                    sampleCodeEditNewFieldCode = (current - 1).toString().padStart(2, '0')
+                                    sampleCodeEditError = null
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Text("−", fontSize = 20.sp)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = sampleCodeEditNewFieldCode.padStart(2, '0'),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(48.dp),
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val current = sampleCodeEditNewFieldCode.toIntOrNull() ?: 1
+                                if (current < 99) {
+                                    sampleCodeEditNewFieldCode = (current + 1).toString().padStart(2, '0')
+                                    sampleCodeEditError = null
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Text("+", fontSize = 20.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    // Sample code selector
                     Text(
                         text = "目标样本编号：",
                         style = MaterialTheme.typography.bodyMedium
@@ -972,9 +1023,9 @@ fun PhotoGalleryScreen(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                val current = sampleCodeEditNewValue.toIntOrNull() ?: 1
+                                val current = sampleCodeEditNewSampleCode.toIntOrNull() ?: 1
                                 if (current > 1) {
-                                    sampleCodeEditNewValue = (current - 1).toString().padStart(2, '0')
+                                    sampleCodeEditNewSampleCode = (current - 1).toString().padStart(2, '0')
                                     sampleCodeEditError = null
                                 }
                             },
@@ -985,7 +1036,7 @@ fun PhotoGalleryScreen(
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(
-                            text = sampleCodeEditNewValue.padStart(2, '0'),
+                            text = sampleCodeEditNewSampleCode.padStart(2, '0'),
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.width(48.dp),
@@ -994,9 +1045,9 @@ fun PhotoGalleryScreen(
                         Spacer(modifier = Modifier.width(16.dp))
                         OutlinedButton(
                             onClick = {
-                                val current = sampleCodeEditNewValue.toIntOrNull() ?: 1
+                                val current = sampleCodeEditNewSampleCode.toIntOrNull() ?: 1
                                 if (current < 99) {
-                                    sampleCodeEditNewValue = (current + 1).toString().padStart(2, '0')
+                                    sampleCodeEditNewSampleCode = (current + 1).toString().padStart(2, '0')
                                     sampleCodeEditError = null
                                 }
                             },
@@ -1019,25 +1070,33 @@ fun PhotoGalleryScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val newCode = sampleCodeEditNewValue.trim().padStart(2, '0')
-                        if (newCode.length < 1 || newCode.toIntOrNull() == null || newCode.toInt() !in 1..99) {
-                            sampleCodeEditError = "请输入有效的编号（1-99）"
+                        val newField = sampleCodeEditNewFieldCode.trim().padStart(2, '0')
+                        val newSample = sampleCodeEditNewSampleCode.trim().padStart(2, '0')
+                        if (newField.length < 1 || newField.toIntOrNull() == null || newField.toInt() !in 1..99) {
+                            sampleCodeEditError = "请输入有效的田块编号（1-99）"
                             return@Button
                         }
-                        if (newCode == editingSampleCodeOldCode.padStart(2, '0')) {
+                        if (newSample.length < 1 || newSample.toIntOrNull() == null || newSample.toInt() !in 1..99) {
+                            sampleCodeEditError = "请输入有效的样本编号（1-99）"
+                            return@Button
+                        }
+                        val sameField = newField == editingSampleCodeFieldCode.padStart(2, '0')
+                        val sameSample = newSample == editingSampleCodeOldCode.padStart(2, '0')
+                        if (sameField && sameSample) {
                             showSampleCodeEditDialog = false
                             return@Button
                         }
-                        if (viewModel.checkFieldSampleConflict(editingSampleCodeFieldCode, newCode)) {
-                            pendingNewSampleCode = newCode
+                        if (viewModel.checkFieldSampleConflict(newField, newSample)) {
+                            pendingNewFieldCodeSample = Pair(newField, newSample)
                             showSampleCodeEditDialog = false
                             showOverwriteSampleConfirm = true
                         } else {
                             showSampleCodeEditDialog = false
-                            viewModel.modifySampleCode(
-                                fieldCode = editingSampleCodeFieldCode,
+                            viewModel.modifyFieldAndSampleCode(
+                                oldFieldCode = editingSampleCodeFieldCode,
                                 oldSampleCode = editingSampleCodeOldCode,
-                                newSampleCode = newCode,
+                                newFieldCode = newField,
+                                newSampleCode = newSample,
                                 overwriteDestination = false
                             )
                         }
@@ -1059,20 +1118,31 @@ fun PhotoGalleryScreen(
     }
 
     if (showOverwriteSampleConfirm) {
+        val (targetField, targetSample) = pendingNewFieldCodeSample
+        val sameField = targetField == editingSampleCodeFieldCode.padStart(2, '0')
         AlertDialog(
             onDismissRequest = {
                 showOverwriteSampleConfirm = false
-                pendingNewSampleCode = ""
+                pendingNewFieldCodeSample = Pair("", "")
             },
             shape = RoundedCornerShape(12.dp),
             title = { Text("目标已有照片") },
             text = {
-                Text(
-                    "田块 ${editingSampleCodeFieldCode} 的样本 ${pendingNewSampleCode} 已存在照片。\n\n" +
-                            "请选择操作方式：\n\n" +
-                            "• 对调：将样本 ${editingSampleCodeOldCode.padStart(2, '0')} 与样本 ${pendingNewSampleCode} 的照片编号互换\n" +
-                            "• 覆盖：样本 ${pendingNewSampleCode} 的所有照片将被完全删除且不可恢复，当前样本 ${editingSampleCodeOldCode.padStart(2, '0')} 的照片将移入"
-                )
+                if (sameField) {
+                    Text(
+                        "田块 ${editingSampleCodeFieldCode} 的样本 ${targetSample} 已存在照片。\n\n" +
+                                "请选择操作方式：\n\n" +
+                                "• 对调：将样本 ${editingSampleCodeOldCode.padStart(2, '0')} 与样本 ${targetSample} 的照片编号互换\n" +
+                                "• 覆盖：样本 ${targetSample} 的所有照片将被完全删除且不可恢复，当前样本 ${editingSampleCodeOldCode.padStart(2, '0')} 的照片将移入"
+                    )
+                } else {
+                    Text(
+                        "田块 ${targetField} 的样本 ${targetSample} 已存在照片。\n\n" +
+                                "请选择操作方式：\n\n" +
+                                "• 对调：将田块 ${editingSampleCodeFieldCode} 样本 ${editingSampleCodeOldCode.padStart(2, '0')} 与田块 ${targetField} 样本 ${targetSample} 的照片编号互换\n" +
+                                "• 覆盖：田块 ${targetField} 样本 ${targetSample} 的所有照片将被完全删除且不可恢复，当前田块 ${editingSampleCodeFieldCode} 样本 ${editingSampleCodeOldCode.padStart(2, '0')} 的照片将移入"
+                    )
+                }
             },
             confirmButton = {
                 Row(
@@ -1107,7 +1177,7 @@ fun PhotoGalleryScreen(
             dismissButton = {
                 TextButton(onClick = {
                     showOverwriteSampleConfirm = false
-                    pendingNewSampleCode = ""
+                    pendingNewFieldCodeSample = Pair("", "")
                 }) {
                     Text("取消")
                 }
@@ -1116,6 +1186,8 @@ fun PhotoGalleryScreen(
     }
 
     if (showSampleSwapConfirmDialog) {
+        val (targetField, targetSample) = pendingNewFieldCodeSample
+        val sameField = targetField == editingSampleCodeFieldCode.padStart(2, '0')
         AlertDialog(
             onDismissRequest = {
                 showSampleSwapConfirmDialog = false
@@ -1123,21 +1195,37 @@ fun PhotoGalleryScreen(
             shape = RoundedCornerShape(12.dp),
             title = { Text("确认对调") },
             text = {
-                Text(
-                    "此操作将田块 ${editingSampleCodeFieldCode} 的样本 ${editingSampleCodeOldCode.padStart(2, '0')} 与样本 ${pendingNewSampleCode} 的所有照片编号互换，是否确认？",
-                    fontSize = 14.sp
-                )
+                if (sameField) {
+                    Text(
+                        "此操作将样本 ${editingSampleCodeOldCode.padStart(2, '0')} 与样本 ${targetSample} 的所有照片编号互换，是否确认？",
+                        fontSize = 14.sp
+                    )
+                } else {
+                    Text(
+                        "此操作将田块 ${editingSampleCodeFieldCode} 样本 ${editingSampleCodeOldCode.padStart(2, '0')} 与田块 ${targetField} 样本 ${targetSample} 的所有照片编号互换，是否确认？",
+                        fontSize = 14.sp
+                    )
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
                     showSampleSwapConfirmDialog = false
-                    val newCode = pendingNewSampleCode
-                    pendingNewSampleCode = ""
-                    viewModel.swapSampleCode(
-                        fieldCode = editingSampleCodeFieldCode,
-                        sampleCodeA = editingSampleCodeOldCode,
-                        sampleCodeB = newCode
-                    )
+                    val (tf, ts) = pendingNewFieldCodeSample
+                    pendingNewFieldCodeSample = Pair("", "")
+                    if (sameField) {
+                        viewModel.swapSampleCode(
+                            fieldCode = editingSampleCodeFieldCode,
+                            sampleCodeA = editingSampleCodeOldCode,
+                            sampleCodeB = ts
+                        )
+                    } else {
+                        viewModel.swapFieldSampleCode(
+                            oldFieldCode = editingSampleCodeFieldCode,
+                            oldSampleCode = editingSampleCodeOldCode,
+                            newFieldCode = tf,
+                            newSampleCode = ts
+                        )
+                    }
                 }) {
                     Text("确认对调")
                 }
@@ -1153,6 +1241,8 @@ fun PhotoGalleryScreen(
     }
 
     if (showSampleForceOverwriteConfirmDialog) {
+        val (targetField, targetSample) = pendingNewFieldCodeSample
+        val sameField = targetField == editingSampleCodeFieldCode.padStart(2, '0')
         AlertDialog(
             onDismissRequest = {
                 showSampleForceOverwriteConfirmDialog = false
@@ -1160,20 +1250,28 @@ fun PhotoGalleryScreen(
             shape = RoundedCornerShape(12.dp),
             title = { Text("确认覆盖") },
             text = {
-                Text(
-                    "此操作将彻底删除田块 ${editingSampleCodeFieldCode} 的样本 ${pendingNewSampleCode} 的所有照片且不可恢复，当前样本 ${editingSampleCodeOldCode.padStart(2, '0')} 的照片将移入，是否确认？",
-                    fontSize = 14.sp
-                )
+                if (sameField) {
+                    Text(
+                        "此操作将彻底删除样本 ${targetSample} 的所有照片且不可恢复，当前样本 ${editingSampleCodeOldCode.padStart(2, '0')} 的照片将移入，是否确认？",
+                        fontSize = 14.sp
+                    )
+                } else {
+                    Text(
+                        "此操作将彻底删除田块 ${targetField} 样本 ${targetSample} 的所有照片且不可恢复，当前田块 ${editingSampleCodeFieldCode} 样本 ${editingSampleCodeOldCode.padStart(2, '0')} 的照片将移入，是否确认？",
+                        fontSize = 14.sp
+                    )
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
                     showSampleForceOverwriteConfirmDialog = false
-                    val newCode = pendingNewSampleCode
-                    pendingNewSampleCode = ""
-                    viewModel.modifySampleCode(
-                        fieldCode = editingSampleCodeFieldCode,
+                    val (tf, ts) = pendingNewFieldCodeSample
+                    pendingNewFieldCodeSample = Pair("", "")
+                    viewModel.modifyFieldAndSampleCode(
+                        oldFieldCode = editingSampleCodeFieldCode,
                         oldSampleCode = editingSampleCodeOldCode,
-                        newSampleCode = newCode,
+                        newFieldCode = tf,
+                        newSampleCode = ts,
                         overwriteDestination = true
                     )
                 }) {

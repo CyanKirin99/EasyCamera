@@ -457,6 +457,75 @@ class MetadataRepository(private val context: Context) {
     }
 
     /**
+     * Swaps sample_code AND field_code values between two (field, sample) combinations,
+     * updating all CSV rows and file path references.
+     */
+    fun swapFieldSampleCode(
+        region: String,
+        date: String,
+        oldFieldCode: String,
+        oldSampleCode: String,
+        newFieldCode: String,
+        newSampleCode: String
+    ): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return true
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return true
+
+            val updatedData = allLines.drop(1).map { row ->
+                if (row.size >= 12 && row[0] == region && row[1] == date) {
+                    if (row[2] == oldFieldCode && row[3] == oldSampleCode) {
+                        val newFilename = row[9]
+                            .replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                            .replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                        val newRelPath = row[10]
+                            .replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                            .replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                        val newFilePath = row[11]
+                            .replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                            .replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                        row.toMutableList().apply {
+                            this[2] = newFieldCode
+                            this[3] = newSampleCode
+                            this[9] = newFilename
+                            this[10] = newRelPath
+                            this[11] = newFilePath
+                        }
+                    } else if (row[2] == newFieldCode && row[3] == newSampleCode) {
+                        val newFilename = row[9]
+                            .replace("_${newFieldCode}_", "_${oldFieldCode}_")
+                            .replace("_${newSampleCode}_", "_${oldSampleCode}_")
+                        val newRelPath = row[10]
+                            .replace("_${newFieldCode}_", "_${oldFieldCode}_")
+                            .replace("_${newSampleCode}_", "_${oldSampleCode}_")
+                        val newFilePath = row[11]
+                            .replace("_${newFieldCode}_", "_${oldFieldCode}_")
+                            .replace("_${newSampleCode}_", "_${oldSampleCode}_")
+                        row.toMutableList().apply {
+                            this[2] = oldFieldCode
+                            this[3] = oldSampleCode
+                            this[9] = newFilename
+                            this[10] = newRelPath
+                            this[11] = newFilePath
+                        }
+                    } else {
+                        row
+                    }
+                } else {
+                    row
+                }
+            }
+
+            return rewriteCsv(file, updatedData)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
      * Deletes all metadata records for a specific sample group within a field.
      */
     fun deleteSampleCodeGroup(

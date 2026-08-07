@@ -530,6 +530,113 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    /** Swaps ALL photos of (oldFieldCode, oldSampleCode) with (newFieldCode, newSampleCode). */
+    fun swapFieldSampleCode(
+        oldFieldCode: String,
+        oldSampleCode: String,
+        newFieldCode: String,
+        newSampleCode: String
+    ) {
+        viewModelScope.launch {
+            val project = _uiState.value.selectedProject ?: return@launch
+            val result = withContext(Dispatchers.IO) {
+                val photosA = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == oldFieldCode && photo.sampleCode == oldSampleCode
+                }
+                val photosB = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == newFieldCode && photo.sampleCode == newSampleCode
+                }
+
+                if (photosA.isEmpty() && photosB.isEmpty()) {
+                    return@withContext "没有找到要操作的照片"
+                }
+
+                val filesOk = repository.swapFieldSampleCode(
+                    project, oldFieldCode, oldSampleCode, newFieldCode, newSampleCode
+                )
+                if (!filesOk) return@withContext "文件重命名失败，操作已回滚"
+
+                val metaOk = metadataRepository.swapFieldSampleCode(
+                    region = project.region,
+                    date = project.date,
+                    oldFieldCode = oldFieldCode,
+                    oldSampleCode = oldSampleCode,
+                    newFieldCode = newFieldCode,
+                    newSampleCode = newSampleCode
+                )
+                if (metaOk) "田块/样本编号已对调" else "元数据更新失败"
+            }
+            _deleteMessage.value = result
+            loadPhotosForProject(project)
+        }
+    }
+
+    /**
+     * Modifies both field code and sample code for a sample group. If [overwriteDestination] is true,
+     * conflicting photos at the destination will be deleted first.
+     * This handles the case where a user accidentally took photos under wrong field & sample.
+     */
+    fun modifyFieldAndSampleCode(
+        oldFieldCode: String,
+        oldSampleCode: String,
+        newFieldCode: String,
+        newSampleCode: String,
+        overwriteDestination: Boolean
+    ) {
+        viewModelScope.launch {
+            val project = _uiState.value.selectedProject ?: return@launch
+            val result = withContext(Dispatchers.IO) {
+                val photosToModify = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == oldFieldCode && photo.sampleCode == oldSampleCode
+                }
+                if (photosToModify.isEmpty()) return@withContext "没有找到要修改的照片"
+
+                if (overwriteDestination) {
+                    val conflicted = _uiState.value.photos.filter { photo ->
+                        photo.fieldCode == newFieldCode && photo.sampleCode == newSampleCode
+                    }
+                    for (photo in conflicted) {
+                        try { File(photo.filePath).delete() } catch (_: Exception) { }
+                        metadataRepository.deleteRecord(photo.region, photo.date, photo.filename)
+                    }
+                }
+
+                var allOk = true
+                val repo = PhotoGalleryRepository(getApplication())
+                // First update field code, then sample code
+                for (photo in photosToModify) {
+                    val file = File(photo.filePath)
+                    if (!file.exists()) { allOk = false; continue }
+                    val parentDir = file.parentFile ?: continue
+                    val newFileName = photo.filename
+                        .replace("_${oldFieldCode}_", "_${newFieldCode}_")
+                        .replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                    val newFile = File(parentDir, newFileName)
+                    if (!file.renameTo(newFile)) { allOk = false }
+                }
+                if (allOk) {
+                    metadataRepository.updateFieldCode(
+                        region = project.region,
+                        date = project.date,
+                        oldFieldCode = oldFieldCode,
+                        newFieldCode = newFieldCode,
+                        sampleCode = oldSampleCode
+                    )
+                    metadataRepository.updateSampleCode(
+                        region = project.region,
+                        date = project.date,
+                        fieldCode = newFieldCode,
+                        oldSampleCode = oldSampleCode,
+                        newSampleCode = newSampleCode
+                    )
+                }
+                if (allOk) "田块/样本编号已更新" else "部分操作失败"
+            }
+            _deleteMessage.value = result
+            loadPhotosForProject(project)
+        }
+    }
+
     /**
      * Updates BBCH and plant height for ALL photos in a sample in a single CSV write.
      * This avoids race conditions that occur when updating each angle individually.
