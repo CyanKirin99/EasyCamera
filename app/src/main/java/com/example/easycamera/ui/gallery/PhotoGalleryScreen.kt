@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
@@ -165,6 +166,17 @@ fun PhotoGalleryScreen(
     var showForceOverwriteConfirmDialog by remember { mutableStateOf(false) }
     var showCsvViewer by remember { mutableStateOf(false) }
 
+    // Sample code editing state
+    var showSampleCodeEditDialog by remember { mutableStateOf(false) }
+    var editingSampleCodeFieldCode by remember { mutableStateOf("") }
+    var editingSampleCodeOldCode by remember { mutableStateOf("") }
+    var sampleCodeEditNewValue by remember { mutableStateOf("") }
+    var sampleCodeEditError by remember { mutableStateOf<String?>(null) }
+    var showOverwriteSampleConfirm by remember { mutableStateOf(false) }
+    var pendingNewSampleCode by remember { mutableStateOf("") }
+    var showSampleSwapConfirmDialog by remember { mutableStateOf(false) }
+    var showSampleForceOverwriteConfirmDialog by remember { mutableStateOf(false) }
+
     val coroutineScope = rememberCoroutineScope()
 
     var showImportDialog by remember { mutableStateOf(false) }
@@ -235,8 +247,7 @@ fun PhotoGalleryScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(top = 8.dp)
-                .padding(horizontal = 12.dp)
+                .padding(horizontal = 10.dp)
         ) {
             if (uiState.isLoading) {
                 Box(
@@ -246,151 +257,165 @@ fun PhotoGalleryScreen(
                     CircularProgressIndicator()
                 }
             } else {
-                // Filter row - always visible (even without projects)
+                // 筛选项目按钮 + 导入项目按钮 左右并排
+                var filterExpanded by remember { mutableStateOf(false) }
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    var filterRegionExpanded by remember { mutableStateOf(false) }
-                    Box {
-                        AssistChip(
-                            onClick = { filterRegionExpanded = true },
-                            label = {
-                                Text(
-                                    if (uiState.filterRegion.isNotEmpty()) uiState.filterRegion else "全部地区",
-                                    fontSize = 13.sp
-                                )
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(32.dp)
+                    OutlinedButton(
+                        onClick = { filterExpanded = !filterExpanded },
+                        modifier = Modifier.weight(1f).height(34.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Text(
+                            text = if (filterExpanded) "收起筛选" else "筛选项目",
+                            fontSize = 12.sp
                         )
-                        DropdownMenu(
-                            expanded = filterRegionExpanded,
-                            onDismissRequest = { filterRegionExpanded = false },
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("全部地区") },
-                                onClick = {
-                                    filterRegionExpanded = false
-                                    viewModel.setFilterRegion("")
-                                }
+                    }
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("application/zip")) },
+                        modifier = Modifier.weight(1f).height(34.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                    ) {
+                        Text(text = "导入项目", fontSize = 12.sp)
+                    }
+                }
+
+                // 筛选条件折叠区
+                AnimatedVisibility(visible = filterExpanded) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        var filterRegionExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            AssistChip(
+                                onClick = { filterRegionExpanded = true },
+                                label = {
+                                    Text(
+                                        if (uiState.filterRegion.isNotEmpty()) uiState.filterRegion else "全部地区",
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(28.dp)
                             )
-                            uiState.allRegions.forEach { option ->
+                            DropdownMenu(
+                                expanded = filterRegionExpanded,
+                                onDismissRequest = { filterRegionExpanded = false },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
                                 DropdownMenuItem(
-                                    text = { Text(option) },
+                                    text = { Text("全部地区") },
                                     onClick = {
                                         filterRegionExpanded = false
-                                        viewModel.setFilterRegion(option)
+                                        viewModel.setFilterRegion("")
                                     }
                                 )
+                                uiState.allRegions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option) },
+                                        onClick = {
+                                            filterRegionExpanded = false
+                                            viewModel.setFilterRegion(option)
+                                        }
+                                    )
+                                }
                             }
                         }
-                    }
-                    var filterDateExpanded by remember { mutableStateOf(false) }
-                    Box {
-                        AssistChip(
-                            onClick = { filterDateExpanded = true },
-                            label = {
-                                Text(
-                                    if (uiState.filterDate.isNotEmpty()) uiState.filterDate else "全部日期",
-                                    fontSize = 13.sp
-                                )
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(32.dp)
-                        )
-                        DropdownMenu(
-                            expanded = filterDateExpanded,
-                            onDismissRequest = { filterDateExpanded = false },
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("全部日期") },
-                                onClick = {
-                                    filterDateExpanded = false
-                                    viewModel.setFilterDate("")
-                                }
+                        var filterDateExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            AssistChip(
+                                onClick = { filterDateExpanded = true },
+                                label = {
+                                    Text(
+                                        if (uiState.filterDate.isNotEmpty()) uiState.filterDate else "全部日期",
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(28.dp)
                             )
-                            uiState.allDates.forEach { option ->
+                            DropdownMenu(
+                                expanded = filterDateExpanded,
+                                onDismissRequest = { filterDateExpanded = false },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
                                 DropdownMenuItem(
-                                    text = { Text(option) },
+                                    text = { Text("全部日期") },
                                     onClick = {
                                         filterDateExpanded = false
-                                        viewModel.setFilterDate(option)
+                                        viewModel.setFilterDate("")
                                     }
                                 )
+                                uiState.allDates.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option) },
+                                        onClick = {
+                                            filterDateExpanded = false
+                                            viewModel.setFilterDate(option)
+                                        }
+                                    )
+                                }
                             }
                         }
-                    }
-                var filterOperatorExpanded by remember { mutableStateOf(false) }
-                    Box {
-                        AssistChip(
-                            onClick = { filterOperatorExpanded = true },
-                            label = {
-                                Text(
-                                    if (uiState.filterOperator.isNotEmpty()) uiState.filterOperator else "全部人员",
-                                    fontSize = 13.sp
-                                )
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(32.dp)
-                        )
-                        DropdownMenu(
-                            expanded = filterOperatorExpanded,
-                            onDismissRequest = { filterOperatorExpanded = false },
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("全部人员") },
-                                onClick = {
-                                    filterOperatorExpanded = false
-                                    viewModel.setFilterOperator("")
-                                }
+                        var filterOperatorExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            AssistChip(
+                                onClick = { filterOperatorExpanded = true },
+                                label = {
+                                    Text(
+                                        if (uiState.filterOperator.isNotEmpty()) uiState.filterOperator else "全部人员",
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(28.dp)
                             )
-                            uiState.allOperators.forEach { option ->
+                            DropdownMenu(
+                                expanded = filterOperatorExpanded,
+                                onDismissRequest = { filterOperatorExpanded = false },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
                                 DropdownMenuItem(
-                                    text = { Text(option) },
+                                    text = { Text("全部人员") },
                                     onClick = {
                                         filterOperatorExpanded = false
-                                        viewModel.setFilterOperator(option)
+                                        viewModel.setFilterOperator("")
                                     }
                                 )
+                                uiState.allOperators.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option) },
+                                        onClick = {
+                                            filterOperatorExpanded = false
+                                            viewModel.setFilterOperator(option)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        if (uiState.filterRegion.isNotEmpty() || uiState.filterDate.isNotEmpty() || uiState.filterOperator.isNotEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    viewModel.setFilterRegion("")
+                                    viewModel.setFilterDate("")
+                                    viewModel.setFilterOperator("")
+                                },
+                                modifier = Modifier.height(26.dp),
+                                contentPadding = PaddingValues(horizontal = 6.dp)
+                            ) {
+                                Text("清除", fontSize = 10.sp)
                             }
                         }
                     }
-                    if (uiState.filterRegion.isNotEmpty() || uiState.filterDate.isNotEmpty() || uiState.filterOperator.isNotEmpty()) {
-                        TextButton(
-                            onClick = {
-                                viewModel.setFilterRegion("")
-                                viewModel.setFilterDate("")
-                                viewModel.setFilterOperator("")
-                            },
-                            modifier = Modifier.height(30.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp)
-                        ) {
-                            Text("清除", fontSize = 11.sp)
-                        }
-                    }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Import button - always visible
-                OutlinedButton(
-                    onClick = { importLauncher.launch(arrayOf("application/zip")) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = "导入项目",
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 ProjectSelectorBar(
                     candidateProjects = uiState.candidateProjects,
@@ -418,29 +443,37 @@ fun PhotoGalleryScreen(
                 } else {
                     val selectedProject = uiState.selectedProject
                     if (selectedProject != null && showProjectContent) {
-                        Text(
-                            text = "当前项目：${selectedProject.projectName}",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        val photoCount = uiState.photos.size
-                        val fieldCount = uiState.photos.map { it.fieldCode }.distinct().size
-                        val sampleCount = uiState.photos.map { "${it.fieldCode}_${it.sampleCode}" }.distinct().size
-                        Text(
-                            text = "田块: $fieldCount    样本: $sampleCount    照片: $photoCount",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        OutlinedButton(
-                            onClick = { showCsvViewer = true },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        // 项目信息 + 查看元数据按钮 同一行
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("查看元数据", fontSize = 12.sp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "当前项目：${selectedProject.projectName}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                val photoCount = uiState.photos.size
+                                val fieldCount = uiState.photos.map { it.fieldCode }.distinct().size
+                                val sampleCount = uiState.photos.map { "${it.fieldCode}_${it.sampleCode}" }.distinct().size
+                                Text(
+                                    text = "田块: $fieldCount    样本: $sampleCount    照片: $photoCount",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { showCsvViewer = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("查看元数据", fontSize = 11.sp)
+                            }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             if (uiState.photos.isEmpty()) {
@@ -518,6 +551,13 @@ fun PhotoGalleryScreen(
                                         fieldEditError = null
                                         showFieldEditDialog = true
                                     },
+                                    onEditSampleCode = { fieldCode, sampleCode ->
+                                        editingSampleCodeFieldCode = fieldCode
+                                        editingSampleCodeOldCode = sampleCode
+                                        sampleCodeEditNewValue = sampleCode
+                                        sampleCodeEditError = null
+                                        showSampleCodeEditDialog = true
+                                    },
                                     onUpdateBbchPlantHeight = { photo, bbch, plantHeight ->
                                         viewModel.updateBbchAndPlantHeight(photo, bbch, plantHeight)
                                     },
@@ -529,51 +569,55 @@ fun PhotoGalleryScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         val selectedProjectForAnalysis = uiState.selectedProject
-                        if (selectedProjectForAnalysis != null) {
-                            OutlinedButton(
-                                onClick = {
-                                    onNavigateToAnalysis(selectedProjectForAnalysis.region, selectedProjectForAnalysis.date)
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(
-                                    text = "分析当前项目",
-                                    fontSize = 16.sp,
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-
-                        OutlinedButton(
-                            onClick = { viewModel.startExport() },
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = exportState !is ExportState.Exporting
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            if (exportState is ExportState.Exporting) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                            if (selectedProjectForAnalysis != null) {
+                                OutlinedButton(
+                                    onClick = {
+                                        onNavigateToAnalysis(selectedProjectForAnalysis.region, selectedProjectForAnalysis.date)
+                                    },
+                                    modifier = Modifier.weight(1f).height(34.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                ) {
+                                    Text(
+                                        text = "分析当前项目",
+                                        fontSize = 12.sp
+                                    )
+                                }
                             }
-                            Text(
-                                text = if (exportState is ExportState.Exporting) "正在导出..." else "导出当前项目",
-                                fontSize = 16.sp,
-                                modifier = Modifier.padding(vertical = 4.dp)
-                            )
+
+                            OutlinedButton(
+                                onClick = { viewModel.startExport() },
+                                modifier = Modifier.weight(1f).height(34.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                enabled = exportState !is ExportState.Exporting
+                            ) {
+                                if (exportState is ExportState.Exporting) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Text(
+                                    text = if (exportState is ExportState.Exporting) "正在导出..." else "导出当前项目",
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 
@@ -899,6 +943,253 @@ fun PhotoGalleryScreen(
         )
     }
 
+    // --- Sample Code Edit Dialog ---
+    if (showSampleCodeEditDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showSampleCodeEditDialog = false
+                sampleCodeEditError = null
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("修改样本编号") },
+            text = {
+                Column {
+                    Text(
+                        text = "田块 ${editingSampleCodeFieldCode}  样本编号：${editingSampleCodeOldCode}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "目标样本编号：",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val current = sampleCodeEditNewValue.toIntOrNull() ?: 1
+                                if (current > 1) {
+                                    sampleCodeEditNewValue = (current - 1).toString().padStart(2, '0')
+                                    sampleCodeEditError = null
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Text("−", fontSize = 20.sp)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = sampleCodeEditNewValue.padStart(2, '0'),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(48.dp),
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val current = sampleCodeEditNewValue.toIntOrNull() ?: 1
+                                if (current < 99) {
+                                    sampleCodeEditNewValue = (current + 1).toString().padStart(2, '0')
+                                    sampleCodeEditError = null
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Text("+", fontSize = 20.sp)
+                        }
+                    }
+                    if (sampleCodeEditError != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = sampleCodeEditError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val newCode = sampleCodeEditNewValue.trim().padStart(2, '0')
+                        if (newCode.length < 1 || newCode.toIntOrNull() == null || newCode.toInt() !in 1..99) {
+                            sampleCodeEditError = "请输入有效的编号（1-99）"
+                            return@Button
+                        }
+                        if (newCode == editingSampleCodeOldCode.padStart(2, '0')) {
+                            showSampleCodeEditDialog = false
+                            return@Button
+                        }
+                        if (viewModel.checkFieldSampleConflict(editingSampleCodeFieldCode, newCode)) {
+                            pendingNewSampleCode = newCode
+                            showSampleCodeEditDialog = false
+                            showOverwriteSampleConfirm = true
+                        } else {
+                            showSampleCodeEditDialog = false
+                            viewModel.modifySampleCode(
+                                fieldCode = editingSampleCodeFieldCode,
+                                oldSampleCode = editingSampleCodeOldCode,
+                                newSampleCode = newCode,
+                                overwriteDestination = false
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("确认")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showSampleCodeEditDialog = false
+                    sampleCodeEditError = null
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showOverwriteSampleConfirm) {
+        AlertDialog(
+            onDismissRequest = {
+                showOverwriteSampleConfirm = false
+                pendingNewSampleCode = ""
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("目标已有照片") },
+            text = {
+                Text(
+                    "田块 ${editingSampleCodeFieldCode} 的样本 ${pendingNewSampleCode} 已存在照片。\n\n" +
+                            "请选择操作方式：\n\n" +
+                            "• 对调：将样本 ${editingSampleCodeOldCode.padStart(2, '0')} 与样本 ${pendingNewSampleCode} 的照片编号互换\n" +
+                            "• 覆盖：样本 ${pendingNewSampleCode} 的所有照片将被完全删除且不可恢复，当前样本 ${editingSampleCodeOldCode.padStart(2, '0')} 的照片将移入"
+                )
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Button(
+                        onClick = {
+                            showOverwriteSampleConfirm = false
+                            showSampleSwapConfirmDialog = true
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("对调")
+                    }
+                    Button(
+                        onClick = {
+                            showOverwriteSampleConfirm = false
+                            showSampleForceOverwriteConfirmDialog = true
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("覆盖")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showOverwriteSampleConfirm = false
+                    pendingNewSampleCode = ""
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showSampleSwapConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showSampleSwapConfirmDialog = false
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("确认对调") },
+            text = {
+                Text(
+                    "此操作将田块 ${editingSampleCodeFieldCode} 的样本 ${editingSampleCodeOldCode.padStart(2, '0')} 与样本 ${pendingNewSampleCode} 的所有照片编号互换，是否确认？",
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSampleSwapConfirmDialog = false
+                    val newCode = pendingNewSampleCode
+                    pendingNewSampleCode = ""
+                    viewModel.swapSampleCode(
+                        fieldCode = editingSampleCodeFieldCode,
+                        sampleCodeA = editingSampleCodeOldCode,
+                        sampleCodeB = newCode
+                    )
+                }) {
+                    Text("确认对调")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showSampleSwapConfirmDialog = false
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showSampleForceOverwriteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showSampleForceOverwriteConfirmDialog = false
+            },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("确认覆盖") },
+            text = {
+                Text(
+                    "此操作将彻底删除田块 ${editingSampleCodeFieldCode} 的样本 ${pendingNewSampleCode} 的所有照片且不可恢复，当前样本 ${editingSampleCodeOldCode.padStart(2, '0')} 的照片将移入，是否确认？",
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSampleForceOverwriteConfirmDialog = false
+                    val newCode = pendingNewSampleCode
+                    pendingNewSampleCode = ""
+                    viewModel.modifySampleCode(
+                        fieldCode = editingSampleCodeFieldCode,
+                        oldSampleCode = editingSampleCodeOldCode,
+                        newSampleCode = newCode,
+                        overwriteDestination = true
+                    )
+                }) {
+                    Text("确认覆盖", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showSampleForceOverwriteConfirmDialog = false
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     if (showCsvViewer && uiState.selectedProject != null) {
         CsvViewerDialog(
             context = context,
@@ -920,21 +1211,24 @@ fun ProjectSelectorBar(
 ) {
     var showNoOtherTip by remember { mutableStateOf(false) }
 
-    Spacer(modifier = Modifier.height(8.dp))
+    Spacer(modifier = Modifier.height(4.dp))
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Button(
             onClick = onToggleCollapse,
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+            modifier = Modifier.height(32.dp)
         ) {
             Text(
                 text = selectedProject?.projectName ?: "选择项目",
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 12.sp
             )
         }
 
@@ -960,7 +1254,9 @@ fun ProjectSelectorBar(
                     FilterChip(
                         selected = false,
                         onClick = { onProjectSelected(project) },
-                        label = { Text(project.projectName, fontSize = 12.sp) }
+                        label = { Text(project.projectName, fontSize = 11.sp) },
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.height(28.dp)
                     )
                 }
             }
@@ -976,7 +1272,7 @@ fun ProjectSelectorBar(
         }
     }
 
-    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 }
 
 data class SampleDisplay(
@@ -991,8 +1287,6 @@ data class FieldDisplay(
     val fieldCode: String,
     val samples: List<SampleDisplay>
 )
-
-private val ANGLE_ORDER = listOf("A", "B", "C", "D")
 
 fun organizePhotos(photos: List<CapturedPhoto>): List<FieldDisplay> {
     val byField = photos.groupBy { it.fieldCode }
@@ -1016,9 +1310,7 @@ fun organizePhotos(photos: List<CapturedPhoto>): List<FieldDisplay> {
                 SampleDisplay(
                     sampleCode = sampleCode,
                     fieldCode = fieldCode,
-                    angles = ANGLE_ORDER.associateWith { angle ->
-                        angles[angle]
-                    },
+                    angles = angles,
                     bbch = bbchVal,
                     plantHeight = phVal
                 )
@@ -1318,6 +1610,7 @@ fun PhotoGrid(
     gridListState: androidx.compose.foundation.lazy.LazyListState,
     onDeleteSample: (String, String) -> Unit,
     onEditFieldCode: (String, String) -> Unit,
+    onEditSampleCode: (String, String) -> Unit,
     onUpdateBbchPlantHeight: (CapturedPhoto, String, String) -> Unit,
     onUpdateSampleBbchPlantHeight: (String, String, String, String, String, String) -> Unit,
     modifier: Modifier = Modifier
@@ -1346,8 +1639,8 @@ fun PhotoGrid(
     LazyColumn(
         state = gridListState,
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(bottom = 80.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(bottom = 60.dp)
     ) {
         fields.forEach { field ->
             item(key = "field_${field.fieldCode}") {
@@ -1356,6 +1649,7 @@ fun PhotoGrid(
                     onPhotoClick = { photo -> previewPhoto = photo },
                     onDeleteSample = onDeleteSample,
                     onEditFieldCode = onEditFieldCode,
+                    onEditSampleCode = onEditSampleCode,
                     onEditSample = { editingSample = it }
                 )
             }
@@ -1396,6 +1690,7 @@ fun FieldSection(
     onPhotoClick: (CapturedPhoto) -> Unit,
     onDeleteSample: (String, String) -> Unit,
     onEditFieldCode: (String, String) -> Unit,
+    onEditSampleCode: (String, String) -> Unit,
     onEditSample: (SampleDisplay) -> Unit
 ) {
     Card(
@@ -1406,7 +1701,7 @@ fun FieldSection(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "田块 ${field.fieldCode}",
@@ -1427,17 +1722,18 @@ fun FieldSection(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             field.samples.forEach { sample ->
                 SampleRow(
                     sample = sample,
                     onPhotoClick = onPhotoClick,
                     onDelete = { onDeleteSample(field.fieldCode, sample.sampleCode) },
+                    onEditSampleCode = { onEditSampleCode(field.fieldCode, sample.sampleCode) },
                     onEditSample = { onEditSample(sample) }
                 )
                 if (sample != field.samples.last()) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
             }
         }
@@ -1449,6 +1745,7 @@ fun SampleRow(
     sample: SampleDisplay,
     onPhotoClick: (CapturedPhoto) -> Unit,
     onDelete: () -> Unit,
+    onEditSampleCode: () -> Unit,
     onEditSample: (SampleDisplay) -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -1465,6 +1762,13 @@ fun SampleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
+            TextButton(
+                onClick = onEditSampleCode,
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                modifier = Modifier.height(22.dp)
+            ) {
+                Text("编辑样本", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+            }
             // BBCH display
             if (sample.bbch.isNotBlank()) {
                 InfoChip("BBCH", sample.bbch)
@@ -1500,15 +1804,24 @@ fun SampleRow(
             }
         }
 
+        // 使用实际角度 key 列表，按拍摄时间排序；无照片时用所有 key
+        val angleKeys = remember(sample.angles) {
+            sample.angles.entries
+                .filter { it.value != null }
+                .sortedBy { (_, photo) -> photo?.lastModified ?: 0L }
+                .map { it.key }
+                .ifEmpty { sample.angles.keys.toList() }
+        }
+
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            items(listOf("A", "B", "C", "D")) { angle ->
+            items(angleKeys) { angle ->
                 val photo = sample.angles[angle]
                 AngleSlot(
                     angleCode = angle,
                     photo = photo,
-                    slotSize = 80.dp,
+                    slotSize = 72.dp,
                     onPhotoClick = { photo?.let(onPhotoClick) }
                 )
             }

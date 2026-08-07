@@ -355,6 +355,138 @@ class MetadataRepository(private val context: Context) {
     }
 
     /**
+     * Updates the sample_code column and file path info for all records matching
+     * (region, date, fieldCode, oldSampleCode) to use newSampleCode instead.
+     */
+    fun updateSampleCode(
+        region: String,
+        date: String,
+        fieldCode: String,
+        oldSampleCode: String,
+        newSampleCode: String
+    ): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return true
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return true
+
+            val updatedData = allLines.drop(1).map { row ->
+                if (row.size >= 12 &&
+                    row[0] == region &&
+                    row[1] == date &&
+                    row[2] == fieldCode &&
+                    row[3] == oldSampleCode
+                ) {
+                    val oldFilename = row[9]
+                    val newFilename = oldFilename.replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                    val oldRelPath = row[10]
+                    val newRelPath = oldRelPath.replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                    val oldFilePath = row[11]
+                    val newFilePath = oldFilePath.replace("_${oldSampleCode}_", "_${newSampleCode}_")
+                    row.toMutableList().apply {
+                        this[3] = newSampleCode
+                        this[9] = newFilename
+                        this[10] = newRelPath
+                        this[11] = newFilePath
+                    }
+                } else {
+                    row
+                }
+            }
+
+            return rewriteCsv(file, updatedData)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Swaps sample_code values between two sample codes within the same field,
+     * updating all CSV rows and file path references.
+     */
+    fun swapSampleCode(
+        region: String,
+        date: String,
+        fieldCode: String,
+        sampleCodeA: String,
+        sampleCodeB: String
+    ): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return true
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return true
+
+            val updatedData = allLines.drop(1).map { row ->
+                if (row.size >= 12 && row[0] == region && row[1] == date && row[2] == fieldCode) {
+                    if (row[3] == sampleCodeA) {
+                        val newFilename = row[9].replace("_${sampleCodeA}_", "_${sampleCodeB}_")
+                        val newRelPath = row[10].replace("_${sampleCodeA}_", "_${sampleCodeB}_")
+                        val newFilePath = row[11].replace("_${sampleCodeA}_", "_${sampleCodeB}_")
+                        row.toMutableList().apply {
+                            this[3] = sampleCodeB
+                            this[9] = newFilename
+                            this[10] = newRelPath
+                            this[11] = newFilePath
+                        }
+                    } else if (row[3] == sampleCodeB) {
+                        val newFilename = row[9].replace("_${sampleCodeB}_", "_${sampleCodeA}_")
+                        val newRelPath = row[10].replace("_${sampleCodeB}_", "_${sampleCodeA}_")
+                        val newFilePath = row[11].replace("_${sampleCodeB}_", "_${sampleCodeA}_")
+                        row.toMutableList().apply {
+                            this[3] = sampleCodeA
+                            this[9] = newFilename
+                            this[10] = newRelPath
+                            this[11] = newFilePath
+                        }
+                    } else {
+                        row
+                    }
+                } else {
+                    row
+                }
+            }
+
+            return rewriteCsv(file, updatedData)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Deletes all metadata records for a specific sample group within a field.
+     */
+    fun deleteSampleCodeGroup(
+        region: String,
+        date: String,
+        fieldCode: String,
+        sampleCode: String
+    ): Boolean {
+        return try {
+            val file = getMetadataFile(region, date)
+            if (!file.exists()) return true
+
+            val allLines = CsvUtils.readAllLines(file)
+            if (allLines.isEmpty()) return true
+
+            val filteredData = allLines.drop(1).filter { row ->
+                val rowRegion = row.getOrElse(0) { "" }
+                val rowDate = row.getOrElse(1) { "" }
+                val rowField = row.getOrElse(2) { "" }
+                val rowSample = row.getOrElse(3) { "" }
+                !(rowRegion == region && rowDate == date && rowField == fieldCode && rowSample == sampleCode)
+            }
+
+            return rewriteCsv(file, filteredData)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
      * Reads ALL metadata records from a project's CSV file.
      * Returns empty list if the file does not exist or cannot be read.
      */

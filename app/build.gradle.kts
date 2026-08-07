@@ -16,10 +16,24 @@ android {
         applicationId = "com.example.easycamera"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    flavorDimensions += "version"
+    productFlavors {
+        create("regular") {
+            dimension = "version"
+            buildConfigField("boolean", "IS_NON_IDEAL", "false")
+        }
+        create("nonideal") {
+            dimension = "version"
+            applicationIdSuffix = ".nonideal"
+            versionNameSuffix = "-非理想"
+            buildConfigField("boolean", "IS_NON_IDEAL", "true")
+        }
     }
 
     val keystorePropertiesFile = rootProject.file("keystore/keystore.properties")
@@ -59,6 +73,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

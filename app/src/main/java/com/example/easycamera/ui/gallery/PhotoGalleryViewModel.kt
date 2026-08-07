@@ -447,6 +447,90 @@ class PhotoGalleryViewModel(application: Application) : AndroidViewModel(applica
     }
 
     /**
+     * Modifies the sample code for a sample group within a field. If [overwriteDestination] is true,
+     * conflicting photos at the destination sample code will be deleted first.
+     */
+    fun modifySampleCode(
+        fieldCode: String,
+        oldSampleCode: String,
+        newSampleCode: String,
+        overwriteDestination: Boolean
+    ) {
+        viewModelScope.launch {
+            val project = _uiState.value.selectedProject ?: return@launch
+            val result = withContext(Dispatchers.IO) {
+                val photosToModify = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == fieldCode && photo.sampleCode == oldSampleCode
+                }
+                if (photosToModify.isEmpty()) return@withContext "没有找到要修改的照片"
+
+                if (overwriteDestination) {
+                    val conflicted = _uiState.value.photos.filter { photo ->
+                        photo.fieldCode == fieldCode && photo.sampleCode == newSampleCode
+                    }
+                    for (photo in conflicted) {
+                        try { File(photo.filePath).delete() } catch (_: Exception) { }
+                        metadataRepository.deleteRecord(photo.region, photo.date, photo.filename)
+                    }
+                }
+
+                var allOk = true
+                for (photo in photosToModify) {
+                    val repo = PhotoGalleryRepository(getApplication())
+                    if (!repo.updateSampleCode(photo, newSampleCode)) {
+                        allOk = false
+                    }
+                }
+                if (allOk) {
+                    metadataRepository.updateSampleCode(
+                        region = project.region,
+                        date = project.date,
+                        fieldCode = fieldCode,
+                        oldSampleCode = oldSampleCode,
+                        newSampleCode = newSampleCode
+                    )
+                }
+                if (allOk) "样本编号已更新" else "部分操作失败"
+            }
+            _deleteMessage.value = result
+            loadPhotosForProject(project)
+        }
+    }
+
+    /** Swaps ALL photos between [sampleCodeA] and [sampleCodeB] within the same field. */
+    fun swapSampleCode(fieldCode: String, sampleCodeA: String, sampleCodeB: String) {
+        viewModelScope.launch {
+            val project = _uiState.value.selectedProject ?: return@launch
+            val result = withContext(Dispatchers.IO) {
+                val photosA = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == fieldCode && photo.sampleCode == sampleCodeA
+                }
+                val photosB = _uiState.value.photos.filter { photo ->
+                    photo.fieldCode == fieldCode && photo.sampleCode == sampleCodeB
+                }
+
+                if (photosA.isEmpty() && photosB.isEmpty()) {
+                    return@withContext "没有找到要操作的照片"
+                }
+
+                val filesOk = repository.swapSampleCode(project, fieldCode, sampleCodeA, sampleCodeB)
+                if (!filesOk) return@withContext "文件重命名失败，操作已回滚"
+
+                val metaOk = metadataRepository.swapSampleCode(
+                    region = project.region,
+                    date = project.date,
+                    fieldCode = fieldCode,
+                    sampleCodeA = sampleCodeA,
+                    sampleCodeB = sampleCodeB
+                )
+                if (metaOk) "样本编号已对调" else "元数据更新失败"
+            }
+            _deleteMessage.value = result
+            loadPhotosForProject(project)
+        }
+    }
+
+    /**
      * Updates BBCH and plant height for ALL photos in a sample in a single CSV write.
      * This avoids race conditions that occur when updating each angle individually.
      */

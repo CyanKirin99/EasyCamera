@@ -7,6 +7,7 @@ import com.example.easycamera.data.model.CaptureMetadata
 import com.example.easycamera.data.model.CaptureSessionConfig
 import com.example.easycamera.data.model.CaptureState
 import com.example.easycamera.data.model.LocationInfo
+import com.example.easycamera.data.model.NonIdealPromptType
 import com.example.easycamera.domain.CaptureCodeManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,11 +19,12 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.example.easycamera.BuildConfig
 
 class CaptureViewModel : ViewModel() {
 
     private val _sessionConfig = MutableStateFlow(
-        CaptureSessionConfig(date = getCurrentDateYYMMDD())
+        CaptureSessionConfig(date = getCurrentDateYYMMDD(), isNonIdealVersion = BuildConfig.IS_NON_IDEAL)
     )
     val sessionConfig: StateFlow<CaptureSessionConfig> = _sessionConfig.asStateFlow()
 
@@ -72,6 +74,44 @@ class CaptureViewModel : ViewModel() {
     private val _codeLockMessage = MutableStateFlow<String?>(null)
     val codeLockMessage: StateFlow<String?> = _codeLockMessage.asStateFlow()
 
+    // --- 非理想提示姊妹版状态 ---
+    private val _exposureCompensation = MutableStateFlow(0)
+    val exposureCompensation: StateFlow<Int> = _exposureCompensation.asStateFlow()
+
+    private val _whiteBalanceValue = MutableStateFlow(0) // -100 冷色 ~ 0 中性 ~ +100 暖色
+    val whiteBalanceValue: StateFlow<Int> = _whiteBalanceValue.asStateFlow()
+
+    val currentPromptType: NonIdealPromptType?
+        get() {
+            if (!BuildConfig.IS_NON_IDEAL) return null
+            val config = _sessionConfig.value
+            val state = _captureState.value
+            if (!config.isNonIdealVersion) return null
+            val code = config.angleSequence.getOrElse(state.currentAngleIndex) { return null }
+            return NonIdealPromptType.fromCode(code)
+        }
+
+    init {
+        if (_sessionConfig.value.isNonIdealVersion) {
+            regeneratePromptSequence()
+        }
+    }
+
+    fun regeneratePromptSequence() {
+        // 6种非理想原因各拍一张，不再随机
+        _sessionConfig.update {
+            it.copy(angleSequence = NonIdealPromptType.entries.map { p -> p.code })
+        }
+    }
+
+    fun updateExposureCompensation(ev: Int) {
+        _exposureCompensation.value = ev.coerceIn(-12, 12) // 宽范围，实际限制由设备EV范围决定
+    }
+
+    fun updateWhiteBalanceValue(value: Int) {
+        _whiteBalanceValue.value = value.coerceIn(-100, 100)
+    }
+
     val previewFileName: String
         get() {
             val config = _sessionConfig.value
@@ -93,13 +133,37 @@ class CaptureViewModel : ViewModel() {
         get() {
             val config = _sessionConfig.value
             val state = _captureState.value
-            return config.angleSequence.getOrElse(state.currentAngleIndex) { "?" }
+            val code = config.angleSequence.getOrElse(state.currentAngleIndex) { "?" }
+            if (BuildConfig.IS_NON_IDEAL) {
+                val prompt = NonIdealPromptType.fromCode(code)
+                return prompt?.label ?: code
+            }
+            return code
+        }
+
+    val currentPromptInstruction: String
+        get() {
+            if (!BuildConfig.IS_NON_IDEAL) return ""
+            val config = _sessionConfig.value
+            val state = _captureState.value
+            if (!config.isNonIdealVersion) return ""
+            val code = config.angleSequence.getOrElse(state.currentAngleIndex) { return "" }
+            val prompt = NonIdealPromptType.fromCode(code) ?: return ""
+            return when (prompt) {
+                NonIdealPromptType.MOTION_BLUR -> "请在按下快门时轻微晃动手机，模拟运动模糊"
+                NonIdealPromptType.TOO_FAR -> "请将手机远离植株，让主体偏小"
+                NonIdealPromptType.TOO_CLOSE -> "请将手机凑近植株，让主体超出画面或过近"
+                NonIdealPromptType.BAD_ANGLE -> "请从侧面或非正对角度拍摄"
+                NonIdealPromptType.OCCLUSION -> "用杂物遮挡镜头或在视野中保留无关杂物，使主体不在中间"
+                NonIdealPromptType.BAD_EXPOSURE -> "请调节下方曝光和白平衡参数后拍摄，让画面曝光异常"
+            }
         }
 
     val progressLabel: String
         get() {
             val state = _captureState.value
-            val total = 4
+            val config = _sessionConfig.value
+            val total = config.angleSequence.size
             val done = state.capturedAngles.size
             return if (state.isGroupComplete) "${total}/${total}" else "${done}/${total}"
         }
@@ -237,7 +301,8 @@ class CaptureViewModel : ViewModel() {
 
     // Angle selection
     fun selectAngleIndex(index: Int) {
-        _captureState.update { CaptureCodeManager.onAngleIndexChanged(it, index) }
+        val maxIdx = _sessionConfig.value.angleSequence.size - 1
+        _captureState.update { CaptureCodeManager.onAngleIndexChanged(it, index, maxIdx) }
         _captureMessage.value = null
     }
 
@@ -479,6 +544,11 @@ class CaptureViewModel : ViewModel() {
         _capturedFilePaths.value = emptyList()
         _captureMessage.value = null
         _codeLockMessage.value = null
+        if (BuildConfig.IS_NON_IDEAL) {
+            regeneratePromptSequence()
+            _exposureCompensation.value = 0
+            _whiteBalanceValue.value = 0
+        }
     }
 
     data class UndoInfo(

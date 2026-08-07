@@ -27,9 +27,9 @@ object CaptureCodeManager {
         )
     }
 
-    fun onAngleIndexChanged(currentState: CaptureState, newIndex: Int): CaptureState {
+    fun onAngleIndexChanged(currentState: CaptureState, newIndex: Int, maxIndex: Int = 5): CaptureState {
         return currentState.copy(
-            currentAngleIndex = newIndex.coerceIn(0, 3),
+            currentAngleIndex = newIndex.coerceIn(0, maxIndex),
             isGroupComplete = false
         )
     }

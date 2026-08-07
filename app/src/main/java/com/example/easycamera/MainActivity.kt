@@ -18,6 +18,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraControl
 import androidx.camera.core.ImageCapture
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -51,9 +52,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -86,6 +89,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -100,10 +104,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -116,12 +123,16 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
+import com.example.easycamera.BuildConfig
 import com.example.easycamera.camera.CameraPreview
+import com.example.easycamera.camera.rememberCameraControlState
+import com.example.easycamera.camera.rememberCameraState
 import com.example.easycamera.camera.rememberImageCaptureState
 import com.example.easycamera.camera.takePhoto
 import com.example.easycamera.data.location.LocationProvider
 import com.example.easycamera.data.model.CaptureMetadata
 import com.example.easycamera.data.model.CaptureSessionConfig
+import com.example.easycamera.data.model.NonIdealPromptType
 import com.example.easycamera.data.model.CaptureState
 import com.example.easycamera.data.repository.MetadataRepository
 import com.example.easycamera.domain.CaptureCodeManager
@@ -138,6 +149,7 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     var onVolumeKeyCapture: (() -> Unit)? = null
@@ -184,8 +196,11 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
     val isCapturing by viewModel.isCapturing.collectAsState()
     val capturedFilePaths by viewModel.capturedFilePaths.collectAsState()
     val codeLockMessage by viewModel.codeLockMessage.collectAsState()
+    val whiteBalanceValue by viewModel.whiteBalanceValue.collectAsState()
 
     val imageCaptureState = rememberImageCaptureState()
+    val cameraControlState = rememberCameraControlState()
+    val cameraState = rememberCameraState()
 
     val context = LocalContext.current
     var metadataWriteFailed by remember { mutableStateOf(false) }
@@ -468,6 +483,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                 if (captureState.isGroupComplete) {
                     CompactGroupConfirmContent(
                         captureState = captureState,
+                        angleSequence = sessionConfig.angleSequence,
                         capturedMetadataList = capturedMetadataList,
                         onRetake = {
                             capturedFilePaths.forEach { path ->
@@ -485,17 +501,42 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                         onConfirm = { viewModel.confirmGroup() }
                     )
                 } else {
+                    val wbFilterColor = remember(whiteBalanceValue) {
+                        if (whiteBalanceValue == 0) {
+                            Color.Transparent
+                        } else {
+                            val alpha = (kotlin.math.abs(whiteBalanceValue) / 100f) * 0.18f
+                            if (whiteBalanceValue > 0) {
+                                // 暖色（红黄色）
+                                Color(1f, 0.7f, 0.2f, alpha)
+                            } else {
+                                // 冷色（蓝色）
+                                Color(0.3f, 0.5f, 1f, alpha)
+                            }
+                        }
+                    }
+                    val wbModifier = if (whiteBalanceValue != 0) {
+                        Modifier.drawWithContent {
+                            drawContent()
+                            drawRect(color = wbFilterColor, size = size)
+                        }
+                    } else {
+                        Modifier
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(0.6f)
-                            .clipToBounds(),
+                            .clipToBounds()
+                            .then(wbModifier),
                         contentAlignment = Alignment.Center
                     ) {
                         if (cameraPermissionGranted && showCamera) {
                             CameraPreview(
                                 modifier = Modifier.fillMaxSize(),
-                                imageCaptureState = imageCaptureState
+                                imageCaptureState = imageCaptureState,
+                                cameraControlState = cameraControlState,
+                                cameraState = cameraState
                             )
                         } else {
                             Box(
@@ -560,6 +601,7 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
 
                         CompactCodeAngleBar(
                             captureState = captureState,
+                            angleSequence = sessionConfig.angleSequence,
                             onSelectAngle = { viewModel.selectAngleIndex(it) },
                             onDecrementField = { viewModel.decrementFieldCode() },
                             onIncrementField = { viewModel.incrementFieldCode() },
@@ -568,35 +610,87 @@ fun EasyCameraApp(modifier: Modifier = Modifier) {
                             progressLabel = viewModel.progressLabel
                         )
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        if (BuildConfig.IS_NON_IDEAL) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            // 非理想提示文字
+                            Text(
+                                text = viewModel.currentPromptInstruction,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.fillMaxWidth()
+                            )
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = sessionConfig.bbch,
-                                onValueChange = { viewModel.updateBbch(it) },
-                                label = { Text("BBCH", fontSize = 11.sp) },
-                                placeholder = { Text("生育期", fontSize = 11.sp) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                textStyle = MaterialTheme.typography.bodySmall,
-                                shape = RoundedCornerShape(6.dp)
-                            )
-                            OutlinedTextField(
-                                value = sessionConfig.plantHeight,
-                                onValueChange = { viewModel.updatePlantHeight(it) },
-                                label = { Text("株高(cm)", fontSize = 11.sp) },
-                                placeholder = { Text("可选", fontSize = 11.sp) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                textStyle = MaterialTheme.typography.bodySmall,
-                                shape = RoundedCornerShape(6.dp)
-                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // 仅「拍摄参数错误」时才开放曝光和白平衡调节
+                            if (viewModel.currentPromptType == NonIdealPromptType.BAD_EXPOSURE) {
+                                // 曝光补偿滑块（范围固定为±12，相机硬件会自动限制实际范围）
+                                val ev by viewModel.exposureCompensation.collectAsState()
+                                Text("曝光补偿: ${ev}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                                Slider(
+                                    value = ev.toFloat(),
+                                    onValueChange = { viewModel.updateExposureCompensation(it.roundToInt()) },
+                                    valueRange = -12f..12f,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                LaunchedEffect(ev, cameraControlState.value) {
+                                    val cc = cameraControlState.value ?: return@LaunchedEffect
+                                    try {
+                                        cc.setExposureCompensationIndex(ev)
+                                    } catch (_: Exception) { }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                // 白平衡滑块（仅拉取数值供滤镜使用）
+                                val wb by viewModel.whiteBalanceValue.collectAsState()
+                                Text("白平衡: ${wb} (冷← ${wb} →暖)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                                Slider(
+                                    value = wb.toFloat(),
+                                    onValueChange = { viewModel.updateWhiteBalanceValue(it.roundToInt()) },
+                                    valueRange = -100f..100f,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
+
+                        // 非理想版不显示BBCH和株高
+                        if (!BuildConfig.IS_NON_IDEAL) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = sessionConfig.bbch,
+                                    onValueChange = { viewModel.updateBbch(it) },
+                                    label = { Text("BBCH", fontSize = 11.sp) },
+                                    placeholder = { Text("生育期", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    textStyle = MaterialTheme.typography.bodySmall,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                OutlinedTextField(
+                                    value = sessionConfig.plantHeight,
+                                    onValueChange = { viewModel.updatePlantHeight(it) },
+                                    label = { Text("株高(cm)", fontSize = 11.sp) },
+                                    placeholder = { Text("可选", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    textStyle = MaterialTheme.typography.bodySmall,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -1294,6 +1388,7 @@ fun CompactInfoBar(
 @Composable
 fun CompactCodeAngleBar(
     captureState: CaptureState,
+    angleSequence: List<String>,
     onSelectAngle: (Int) -> Unit,
     onDecrementField: () -> Unit,
     onIncrementField: () -> Unit,
@@ -1301,6 +1396,11 @@ fun CompactCodeAngleBar(
     onIncrementSample: () -> Unit,
     progressLabel: String
 ) {
+    val view = LocalView.current
+    val hapticClick: () -> Unit = {
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1322,7 +1422,7 @@ fun CompactCodeAngleBar(
             ) {
                 Text("田块", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(
-                    onClick = onDecrementField,
+                    onClick = { onDecrementField(); hapticClick() },
                     contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
                     modifier = Modifier.size(24.dp)
                 ) { Text("−", fontSize = 14.sp) }
@@ -1333,7 +1433,7 @@ fun CompactCodeAngleBar(
                     modifier = Modifier.padding(horizontal = 2.dp)
                 )
                 TextButton(
-                    onClick = onIncrementField,
+                    onClick = { onIncrementField(); hapticClick() },
                     contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
                     modifier = Modifier.size(24.dp)
                 ) { Text("+", fontSize = 14.sp) }
@@ -1345,7 +1445,7 @@ fun CompactCodeAngleBar(
             ) {
                 Text("样本", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(
-                    onClick = onDecrementSample,
+                    onClick = { onDecrementSample(); hapticClick() },
                     contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
                     modifier = Modifier.size(24.dp)
                 ) { Text("−", fontSize = 14.sp) }
@@ -1356,7 +1456,7 @@ fun CompactCodeAngleBar(
                     modifier = Modifier.padding(horizontal = 2.dp)
                 )
                 TextButton(
-                    onClick = onIncrementSample,
+                    onClick = { onIncrementSample(); hapticClick() },
                     contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
                     modifier = Modifier.size(24.dp)
                 ) { Text("+", fontSize = 14.sp) }
@@ -1371,10 +1471,11 @@ fun CompactCodeAngleBar(
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val angleSequence = listOf("A", "B", "C", "D")
             angleSequence.forEachIndexed { index, angle ->
                 val isCaptured = angle in captureState.capturedAngles
                 val isSelected = index == captureState.currentAngleIndex
@@ -1399,9 +1500,9 @@ fun CompactCodeAngleBar(
                 )
 
                 Button(
-                    onClick = { onSelectAngle(index) },
+                    onClick = { onSelectAngle(index); hapticClick() },
                     modifier = Modifier
-                        .weight(1f)
+                        .widthIn(min = 60.dp)
                         .graphicsLayer(scaleX = angleScale, scaleY = angleScale),
                     shape = RoundedCornerShape(6.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -1412,12 +1513,12 @@ fun CompactCodeAngleBar(
                     elevation = ButtonDefaults.buttonElevation(
                         defaultElevation = if (isSelected) 6.dp else 0.dp
                     ),
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                     interactionSource = angleInteractionSource
                 ) {
                     Text(
                         text = if (isCaptured) "$angle ✓" else angle,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = if (isCaptured || isSelected) FontWeight.Bold else FontWeight.Normal
                     )
                 }
@@ -1429,6 +1530,7 @@ fun CompactCodeAngleBar(
 @Composable
 fun CompactGroupConfirmContent(
     captureState: CaptureState,
+    angleSequence: List<String>,
     capturedMetadataList: List<CaptureMetadata>,
     onRetake: () -> Unit,
     onConfirm: () -> Unit
@@ -1457,14 +1559,17 @@ fun CompactGroupConfirmContent(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val angleSequence = listOf("A", "B", "C", "D")
-            for (row in 0..1) {
+            // 动态计算2列布局的行数
+            val cols = 2
+            val rows = (angleSequence.size + cols - 1) / cols
+            for (row in 0 until rows) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    for (col in 0..1) {
-                        val index = row * 2 + col
+                    for (col in 0 until cols) {
+                        val index = row * cols + col
+                        if (index >= angleSequence.size) break
                         val angle = angleSequence[index]
                         val metadata = capturedMetadataList.find { it.angleCode == angle }
                         Column(

@@ -1,9 +1,14 @@
 package com.example.easycamera.camera
 
 import android.content.Context
+import android.hardware.camera2.CaptureRequest
 import android.media.MediaActionSound
 import android.view.ViewGroup
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.AspectRatio
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraControl
+import androidx.camera.core.ExposureState
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
@@ -28,9 +33,21 @@ fun rememberImageCaptureState(): MutableState<ImageCapture?> {
 }
 
 @Composable
+fun rememberCameraControlState(): MutableState<CameraControl?> {
+    return remember { mutableStateOf(null) }
+}
+
+@Composable
+fun rememberCameraState(): MutableState<Camera?> {
+    return remember { mutableStateOf(null) }
+}
+
+@Composable
 fun CameraPreview(
     modifier: Modifier,
-    imageCaptureState: MutableState<ImageCapture?>
+    imageCaptureState: MutableState<ImageCapture?>,
+    cameraControlState: MutableState<CameraControl?>? = null,
+    cameraState: MutableState<Camera?>? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -47,21 +64,35 @@ fun CameraPreview(
             val cameraProvider = cameraProviderFuture.get()
             val preview = Preview.Builder()
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .apply {
+                    Camera2Interop.Extender(this).setCaptureRequestOption(
+                        CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_ON
+                    )
+                }
                 .build().also {
                 it.setSurfaceProvider(previewView.surfaceProvider)
             }
             val imageCapture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .apply {
+                    Camera2Interop.Extender(this).setCaptureRequestOption(
+                        CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_ON
+                    )
+                }
                 .build()
             imageCaptureState.value = imageCapture
 
             val cameraSelector = androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA
             try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
+                val camera = cameraProvider.bindToLifecycle(
                     lifecycleOwner, cameraSelector, preview, imageCapture
                 )
+                cameraControlState?.value = camera.cameraControl
+                cameraState?.value = camera
             } catch (e: Exception) {
                 // Camera binding failed - silently handled
             }
